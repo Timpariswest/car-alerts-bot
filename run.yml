@@ -1,0 +1,64 @@
+name: Car Alerts Bot
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"   # toutes les 20 min
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode (normal | seed | dry-run)"
+        required: false
+        default: "normal"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: car-alerts-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          # Gmail principal (chabodt@gmail.com → LaCentrale + AutoScout24)
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          # Gmail secondaire (timdelmas123@gmail.com → Leboncoin)
+          GMAIL_USER_2: ${{ secrets.GMAIL_USER_2 }}
+          GMAIL_APP_PASSWORD_2: ${{ secrets.GMAIL_APP_PASSWORD_2 }}
+          # Telegram
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ "$MODE" = "seed" ]; then
+            python main.py --seed
+          elif [ "$MODE" = "dry-run" ]; then
+            python main.py --dry-run
+          else
+            python main.py
+          fi
+
+      - name: Commit state.json
+        if: github.event.inputs.mode != 'dry-run'
+        run: |
+          git config user.name "car-alerts-bot"
+          git config user.email "car-alerts-bot@users.noreply.github.com"
+          git add state.json || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update state [skip ci]"
+            git push
+          fi
