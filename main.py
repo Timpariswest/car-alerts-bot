@@ -1,13 +1,12 @@
 """
 Bot d'alertes voitures — orchestration principale.
 
-Pipeline :
-  1. Lit la boîte Gmail (IMAP) pour les emails d'alerte des 3 sites
-  2. Parse chaque email → liste d'annonces
-  3. Pour chaque annonce : matche avec une recherche config, applique les filtres durs
-  4. Score l'annonce (prix vs cote + keywords + km)
-  5. Si score ≥ seuil et pas déjà vue → notifie Telegram
-  6. Marque comme vue et sauvegarde state
+Pipeline (nouveau mode scraping direct) :
+  1. Scrape directement LeBonCoin, LaCentrale, AutoScout24
+  2. Pour chaque annonce : matche avec une recherche config, applique les filtres durs
+  3. Score l'annonce (prix vs cote + keywords + km)
+  4. Si score >= seuil et pas déjà vue → notifie Telegram
+  5. Marque comme vue et sauvegarde state
 
 Usage :
   python main.py               # run normal
@@ -23,10 +22,9 @@ from pathlib import Path
 
 import yaml
 
-from imap_client import fetch_all_accounts, load_accounts_from_env
+from scraper import fetch_listings
 from models import Listing, ScoringConfig, SearchConfig
 from notifier import TelegramNotifier
-from parsers import PARSERS
 from scoring import listing_passes_hard_filters, score_listing
 from state import State
 
@@ -56,7 +54,6 @@ def match_listing_to_search(listing: Listing, searches: list[SearchConfig]) -> S
             continue
         if all(k.lower() in blob for k in s.keywords_must):
             return s
-    # Fallback : première recherche si aucune ne match strictement (annonces Leboncoin avec titre court)
     return None
 
 
@@ -70,60 +67,28 @@ def main() -> int:
     searches = build_searches(cfg)
     scoring_cfg = build_scoring(cfg)
     max_notifs = int(cfg.get("max_notifications_per_run", 10))
-    mailbox = cfg.get("mailbox", "INBOX")
-    max_age_days = int(cfg.get("max_email_age_days", 3))
-    label_filter = cfg.get("label_filter")
 
     print(f"[main] dry_run={args.dry_run} seed={args.seed} max_notifs={max_notifs}")
     print(f"[main] {len(searches)} recherches configurées")
 
-    # 1. Fetch emails (multi-comptes)
+    # 1. Scraping direct des sites
     try:
-        accounts = load_accounts_from_env()
-    except RuntimeError as e:
-        print(f"[main] ERREUR : {e}")
-        return 1
-
-    print(f"[main] {len(accounts)} compte(s) Gmail : {[a.user for a in accounts]}")
-
-    try:
-        emails = fetch_all_accounts(
-            accounts,
-            mailbox=mailbox,
-            max_age_days=max_age_days,
-            label_filter=label_filter,
-        )
+        all_listings = fetch_listings()
     except Exception as e:
-        print(f"[main] Erreur IMAP fetch : {e}")
+        print(f"[main] Erreur scraping : {e}")
         traceback.print_exc()
         return 2
 
-    print(f"[main] {len(emails)} emails d'alerte récupérés")
+    print(f"[main] {len(all_listings)} annonces brutes récupérées")
 
-    # 2. Parse tous les emails → annonces
-    all_listings: list[Listing] = []
-    for em in emails:
-        parser = PARSERS.get(em.site)
-        if not parser:
-            continue
-        try:
-            listings = parser(em)
-            all_listings.extend(listings)
-            print(f"  [{em.site}] {em.subject[:60]!r} → {len(listings)} annonces")
-        except Exception as e:
-            print(f"  [{em.site}] parse error : {e}")
-            traceback.print_exc()
-
-    print(f"[main] Total {len(all_listings)} annonces brutes")
-
-    # Dédup par uid (les sites peuvent réenvoyer la même annonce sur plusieurs emails)
+    # Dédup par uid
     dedup: dict[str, Listing] = {}
     for l in all_listings:
         if l.uid not in dedup:
             dedup[l.uid] = l
     all_listings = list(dedup.values())
 
-    # 3-4. Pour chaque annonce : match + filtres durs + score
+    # 2-3. Pour chaque annonce : match + filtres durs + score
     state = State(str(STATE_PATH))
     notifier = TelegramNotifier() if not args.dry_run else None
 
@@ -145,13 +110,13 @@ def main() -> int:
     # Tri par score décroissant
     candidates.sort(key=lambda x: x.score, reverse=True)
 
-    # 5. Filtre seuil + déjà-vu + push
+    # 4. Filtre seuil + déjà-vu + push
     sent = 0
     for l in candidates:
         if state.is_seen(l.uid):
             continue
         if l.score < scoring_cfg.min_score_to_notify:
-            state.mark_seen(l.uid)  # on marque quand même pour pas rescorer en boucle
+            state.mark_seen(l.uid)
             continue
 
         if args.seed:
@@ -175,7 +140,7 @@ def main() -> int:
         else:
             print(f"  [send-fail] {l.uid}")
 
-    # 6. Save
+    # 5. Save
     if not args.dry_run:
         state.save()
 
