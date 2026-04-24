@@ -33,12 +33,7 @@ jobs:
 
       - name: Run bot
         env:
-          # Gmail principal (chabodt@gmail.com → LaCentrale + AutoScout24)
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          # Gmail secondaire (timdelmas123@gmail.com → Leboncoin)
-          GMAIL_USER_2: ${{ secrets.GMAIL_USER_2 }}
-          GMAIL_APP_PASSWORD_2: ${{ secrets.GMAIL_APP_PASSWORD_2 }}
+        
           # Telegram
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
