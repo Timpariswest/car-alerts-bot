@@ -36,24 +36,32 @@ class TelegramNotifier:
         return self._send_message(caption)
 
     def _format(self, l: Listing) -> str:
-        price = f"{l.price:,} €".replace(",", " ") if l.price else "prix NC"
-        year = str(l.year) if l.year else "année NC"
-        km = f"{l.mileage:,} km".replace(",", " ") if l.mileage else "km NC"
-        loc = l.location or ""
+        price = f"{l.price:,} €".replace(",", " ") if l.price else "—"
+        year = str(l.year) if l.year else "—"
+        km = f"{l.mileage:,} km".replace(",", " ") if l.mileage else "—"
+        loc = l.location or "—"
         site = l.site.upper()
         search = l.matched_search or ""
         score = f"{l.score:+.1f}" if l.score else "0.0"
 
+        # Calcul écart prix vs cote
+        price_note = ""
+        if l.price and l.score_breakdown:
+            # Extraire la ligne prix du breakdown
+            for line in l.score_breakdown:
+                if "vs cote" in line:
+                    price_note = f"\n<i>{self._esc(line)}</i>"
+                    break
+
         lines = [
             f"🚗 <b>{self._esc(l.title)}</b>",
-            f"🏷️ <i>{self._esc(search)}</i> — {site}   ⭐ score {score}",
-            f"💶 <b>{price}</b>   📅 {year}   🛣️ {km}",
+            f"💰 <b>{price}</b>{price_note}",
+            f"📍 {self._esc(loc)}",
+            f"🛣 {km}",
+            f"📅 {year}",
+            f"🏷 {site}  ⭐ score {score}",
+            f'🔗 <a href="{l.url}">Voir l\'annonce</a>',
         ]
-        if loc:
-            lines.append(f"📍 {self._esc(loc)}")
-        if l.score_breakdown:
-            lines.append(f"<i>{self._esc(' | '.join(l.score_breakdown))}</i>")
-        lines.append(f'<a href="{l.url}">→ Voir l\'annonce</a>')
         return "\n".join(lines)
 
     @staticmethod

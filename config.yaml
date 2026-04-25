@@ -1,56 +1,47 @@
-# Config du bot d'alertes voitures (lecture emails officiels)
-# Principe : tu configures tes recherches sur les sites, ils t'envoient les alertes
-# par email, le bot lit ta boîte, score les annonces et push les bonnes affaires sur Telegram.
-
-# Boîte Gmail à scanner (celle qui reçoit les alertes)
-mailbox: "INBOX"
-
-# Âge maximum des emails à considérer (évite de rescanner 6 mois d'archive)
-max_email_age_days: 3
-
-# Label Gmail optionnel à filtrer. Si vide, on scanne toute l'inbox filtrée par expéditeur.
-# Conseil : créé un filtre Gmail "from:noreply@leboncoin.fr OR from:alerts@lacentrale.fr OR from:newsletter@autoscout24.fr"
-# qui applique le label "car-alerts", puis mets ici :
-label_filter: null  # ex: "car-alerts"
-
-# Recherches — permet de tagguer chaque alerte par modèle voulu
 searches:
-  - name: "Clio 3"
+  - name: "Renault Clio III"
+    # Doit contenir "clio" dans le titre
     keywords_must: ["clio"]
-    keywords_nice: ["dynamique", "expression", "tce", "1.2", "entretien", "révision", "distribution"]
-    keywords_bad: ["accident", "moteur hs", "boite hs", "épave", "non roulant", "pour pièces", "fuite huile"]
+    # Bonus si ces mots apparaissent
+    keywords_nice: ["dynamique", "expression", "tce", "1.2", "1.5", "dci", "entretien", "révision", "distribution", "courroie"]
+    # Rejeter si ces mots apparaissent (mauvais modèle ou mauvais état)
+    keywords_bad: ["clio 4", "clio iv", "clio4", "clio 5", "clio v", "clio5",
+                   "clio 2", "clio ii", "clio2", "clio rs", "accident",
+                   "moteur hs", "boite hs", "épave", "non roulant",
+                   "pour pièces", "fuite huile", "moteur cassé"]
     price_min: null
-    price_max: 3500
+    price_max: 3000
     year_min: null
     year_max: null
     mileage_max: 260000
-    market_price_ref: 3000
+    require_price: true      # rejeter si prix absent
+    require_mileage: true    # rejeter si km absent
+    market_price_ref: 2500   # cote moyenne Clio 3
 
   - name: "Peugeot 207"
     keywords_must: ["207"]
-    keywords_nice: ["hdi", "sw", "entretien", "révision", "distribution faite", "courroie", "1.4", "1.6"]
-    keywords_bad: ["accident", "moteur hs", "boite hs", "épave", "non roulant", "pour pièces", "fuite huile"]
+    keywords_nice: ["hdi", "sw", "break", "entretien", "révision", "distribution faite", "courroie", "1.4", "1.6"]
+    keywords_bad: ["peugeot 206", "peugeot 208", "208", "206",
+                   "rétroviseur", "rétro 207", "phare 207", "pare-choc 207",
+                   "accident", "moteur hs", "boite hs", "épave",
+                   "non roulant", "pour pièces", "fuite huile"]
     price_min: null
-    price_max: 3500
+    price_max: 3000
     year_min: null
     year_max: null
     mileage_max: 260000
-    market_price_ref: 3000
+    require_price: true
+    require_mileage: true
+    market_price_ref: 2500   # cote moyenne 207
 
-# Scoring — poids de chaque facteur pour détecter les bonnes affaires
+# Scoring — garde le système prix affiché vs cote
 scoring:
-  # Bonus/malus pour l'écart prix vs cote (en points)
-  price_vs_market_weight: 40   # -10% sous la cote = +4 points, -30% = +12 points
-  # Bonus mots-clés positifs (par mot trouvé, max)
+  price_vs_market_weight: 40
   nice_keyword_bonus: 2
   nice_keyword_cap: 6
-  # Malus mots-clés négatifs (par mot trouvé)
   bad_keyword_penalty: 5
-  # Bonus si km en-dessous de la norme (15 000 km/an)
   km_under_normal_bonus: 3
   km_over_normal_penalty: 2
-  # Seuil minimum pour pousser sur Telegram (en dessous : on ignore)
-  min_score_to_notify: -10
+  min_score_to_notify: -15   # envoie tout ce qui passe les filtres durs
 
-# Limites de sécurité
-max_notifications_per_run: 10
+max_notifications_per_run: 15

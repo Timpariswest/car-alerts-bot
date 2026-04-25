@@ -87,24 +87,42 @@ def score_listing(
 def listing_passes_hard_filters(listing: Listing, search: SearchConfig) -> Tuple[bool, str]:
     """Filtre dur : rejette les annonces qui ne respectent pas les bornes.
     Retourne (passe, raison_si_rejet)."""
-    # Mots-clés obligatoires
-    if search.keywords_must:
-        blob = " ".join(filter(None, [listing.title or "", listing.description or ""])).lower()
-        if not any(k.lower() in blob for k in search.keywords_must):
-            return False, f"ne matche pas keywords_must={search.keywords_must}"
+    blob = " ".join(filter(None, [listing.title or "", listing.description or ""])).lower()
 
+    # Mots-clés obligatoires (tous doivent être présents)
+    if search.keywords_must:
+        if not all(k.lower() in blob for k in search.keywords_must):
+            return False, f"keywords_must absent: {search.keywords_must}"
+
+    # Mots-clés interdits (un seul suffit à rejeter)
+    if search.keywords_bad:
+        for bad in search.keywords_bad:
+            if bad.lower() in blob:
+                return False, f"keyword interdit: '{bad}'"
+
+    # Prix obligatoire
+    if search.require_price and listing.price is None:
+        return False, "prix absent (obligatoire)"
+
+    # Km obligatoire
+    if search.require_mileage and listing.mileage is None:
+        return False, "kilométrage absent (obligatoire)"
+
+    # Bornes prix
     if listing.price is not None:
         if search.price_min is not None and listing.price < search.price_min:
-            return False, f"prix {listing.price} < min {search.price_min}"
+            return False, f"prix {listing.price}€ < min {search.price_min}€"
         if search.price_max is not None and listing.price > search.price_max:
-            return False, f"prix {listing.price} > max {search.price_max}"
+            return False, f"prix {listing.price}€ > max {search.price_max}€"
 
+    # Bornes année
     if listing.year is not None:
         if search.year_min is not None and listing.year < search.year_min:
             return False, f"année {listing.year} < min {search.year_min}"
         if search.year_max is not None and listing.year > search.year_max:
             return False, f"année {listing.year} > max {search.year_max}"
 
+    # Km max
     if listing.mileage is not None and search.mileage_max is not None:
         if listing.mileage > search.mileage_max:
             return False, f"km {listing.mileage} > max {search.mileage_max}"

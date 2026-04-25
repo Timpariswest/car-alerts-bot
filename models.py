@@ -19,6 +19,8 @@ class SearchConfig:
     year_max: Optional[int] = None
     mileage_max: Optional[int] = None
     market_price_ref: Optional[int] = None
+    require_price: bool = False
+    require_mileage: bool = False
 
 
 @dataclass

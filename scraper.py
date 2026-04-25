@@ -38,39 +38,44 @@ HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 
-# URLs à scraper — ajuste ici pour changer les recherches
+# URLs à scraper — Clio 3 et Peugeot 207 strictement filtrés
 SEARCH_URLS = [
-    # LeBonCoin
+    # LeBonCoin — "clio 3" et "clio iii" pour cibler uniquement la 3e génération
     {
         "site": "leboncoin",
-        "url": "https://www.leboncoin.fr/recherche?category=2&text=clio+3&mileage_max=260000&sort=time&order=desc",
+        "url": "https://www.leboncoin.fr/recherche?category=2&text=clio+3&price_max=3000&mileage_max=260000&sort=time&order=desc",
         "label": "LBC Clio 3",
     },
     {
         "site": "leboncoin",
-        "url": "https://www.leboncoin.fr/recherche?category=2&text=peugeot+207&mileage_max=260000&sort=time&order=desc",
+        "url": "https://www.leboncoin.fr/recherche?category=2&text=clio+iii&price_max=3000&mileage_max=260000&sort=time&order=desc",
+        "label": "LBC Clio III",
+    },
+    {
+        "site": "leboncoin",
+        "url": "https://www.leboncoin.fr/recherche?category=2&text=peugeot+207&price_max=3000&mileage_max=260000&sort=time&order=desc",
         "label": "LBC 207",
     },
-    # LaCentrale
+    # LaCentrale — filtre modèle exact Clio 3 et 207
     {
         "site": "lacentrale",
-        "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO&mileageMax=260000",
-        "label": "LaCentrale Clio",
+        "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO+3&mileageMax=260000&priceMax=3000",
+        "label": "LaCentrale Clio 3",
     },
     {
         "site": "lacentrale",
-        "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000",
+        "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000&priceMax=3000",
         "label": "LaCentrale 207",
     },
-    # AutoScout24
+    # AutoScout24 — filtre modèle + prix + km dans l'URL
     {
         "site": "autoscout24",
-        "url": "https://www.autoscout24.fr/lst/renault/clio?milemax=260000&sort=age&desc=1",
+        "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C",
         "label": "AS24 Clio",
     },
     {
         "site": "autoscout24",
-        "url": "https://www.autoscout24.fr/lst/peugeot/207?milemax=260000&sort=age&desc=1",
+        "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C",
         "label": "AS24 207",
     },
 ]
