@@ -13,7 +13,7 @@ searches:
     year_min: null
     year_max: null
     mileage_max: 260000
-    require_price: false
+    require_price: true        # ignorer les annonces sans prix affiché
     require_mileage: false
     market_price_ref: 2500   # cote moyenne Clio 3
 
@@ -29,11 +29,13 @@ searches:
     year_min: null
     year_max: null
     mileage_max: 260000
-    require_price: false
+    require_price: true        # ignorer les annonces sans prix affiché
     require_mileage: false
     market_price_ref: 2500   # cote moyenne 207
 
-# Scoring — garde le système prix affiché vs cote
+# Scoring
+# score = (cote - prix) / cote * 40 + bonus km + bonus mots-clés
+# Exemples :  prix 2000€ → +8  |  prix 1500€ → +16  |  prix 1000€ → +24
 scoring:
   price_vs_market_weight: 40
   nice_keyword_bonus: 2
@@ -41,6 +43,6 @@ scoring:
   bad_keyword_penalty: 5
   km_under_normal_bonus: 3
   km_over_normal_penalty: 2
-  min_score_to_notify: -15   # envoie tout ce qui passe les filtres durs
+  min_score_to_notify: 8     # ≈ prix ≤ 2000€ vs cote 2500€ → marge réelle possible
 
-max_notifications_per_run: 15
+max_notifications_per_run: 10
