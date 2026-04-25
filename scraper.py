@@ -85,12 +85,12 @@ def _make_direct_session():
     return requests.Session(), False
 
 
-def _cf_get(session, url: str, *, is_cf: bool, timeout: int = 30, retries: int = 2):
+def _cf_get(session, url: str, *, is_cf: bool, timeout: int = 30, retries: int = 2, verify: bool = True):
     """GET avec retry. Retourne un objet response ou None."""
     for attempt in range(retries + 1):
         try:
             if is_cf:
-                r = session.get(url, headers=HEADERS_HTML, timeout=timeout)
+                r = session.get(url, headers=HEADERS_HTML, timeout=timeout, verify=verify)
             else:
                 r = session.get(url, headers=HEADERS_HTML, timeout=timeout)
             print(f"    [HTTP {r.status_code}] {url[:80]}")
@@ -107,11 +107,11 @@ def _cf_get(session, url: str, *, is_cf: bool, timeout: int = 30, retries: int =
     return None
 
 
-def _cf_post(session, url: str, json_payload: dict, headers: dict, *, is_cf: bool, timeout: int = 30):
+def _cf_post(session, url: str, json_payload: dict, headers: dict, *, is_cf: bool, timeout: int = 30, verify: bool = True):
     """POST JSON avec curl_cffi ou requests."""
     try:
         if is_cf:
-            r = session.post(url, json=json_payload, headers=headers, timeout=timeout)
+            r = session.post(url, json=json_payload, headers=headers, timeout=timeout, verify=verify)
         else:
             r = session.post(url, json=json_payload, headers=headers, timeout=timeout)
         return r
@@ -186,7 +186,7 @@ def _parse_year(val) -> Optional[int]:
 # ---------------------------------------------------------------------------
 # LeBonCoin — API interne (clé publique) via curl_cffi
 # ---------------------------------------------------------------------------
-def _fetch_lbc(session, is_cf: bool) -> List[Listing]:
+def _fetch_lbc(session, is_cf: bool, verify: bool = True) -> List[Listing]:
     """Scrape LeBonCoin via API JSON interne + fallback HTML."""
     url_api = "https://api.leboncoin.fr/api/adfinder/v1/search"
     headers_api = {
@@ -221,7 +221,7 @@ def _fetch_lbc(session, is_cf: bool) -> List[Listing]:
             "sort_order": "desc",
             "owner": {"type": "all"},
         }
-        r = _cf_post(session, url_api, payload, headers_api, is_cf=is_cf)
+        r = _cf_post(session, url_api, payload, headers_api, is_cf=is_cf, verify=verify)
         if r and r.status_code == 200:
             try:
                 data = r.json()
@@ -242,12 +242,12 @@ def _fetch_lbc(session, is_cf: bool) -> List[Listing]:
     # Fallback HTML si API bloquée
     print("[scraper] LBC API = 0 → fallback HTML (CF bypass)...")
     # Warmup cookie
-    _cf_get(session, "https://www.leboncoin.fr/", is_cf=is_cf, retries=0)
+    _cf_get(session, "https://www.leboncoin.fr/", is_cf=is_cf, retries=0, verify=verify)
     time.sleep(2)
 
     for text, _ in searches:
         url = f"https://www.leboncoin.fr/recherche?category=2&text={requests.utils.quote(text)}&price_max=3000&mileage_max=260000&sort=time&order=desc"
-        r = _cf_get(session, url, is_cf=is_cf)
+        r = _cf_get(session, url, is_cf=is_cf, verify=verify)
         if r:
             lst = _parse_lbc_next_data(r.text)
             print(f"  [LBC HTML '{text}'] {len(lst)} annonces")
@@ -690,8 +690,9 @@ def _fetch_html_source(proxy_session, proxy_is_cf: bool, direct_session, direct_
 
     session = proxy_session if use_proxy else direct_session
     is_cf = proxy_is_cf if use_proxy else direct_is_cf
+    verify = not use_proxy  # Bright Data fait interception SSL → désactiver verify
 
-    r = _cf_get(session, url, is_cf=is_cf)
+    r = _cf_get(session, url, is_cf=is_cf, verify=verify)
     if r:
         listings = parser(r.text, url)
         print(f"  [{label}] {len(listings)} annonces")
@@ -711,7 +712,7 @@ def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
     if HAS_PROXY:
         print("[scraper] LeBonCoin (proxy Bright Data)...")
         try:
-            lbc = _fetch_lbc(proxy_session, proxy_is_cf)
+            lbc = _fetch_lbc(proxy_session, proxy_is_cf, verify=False)
             all_listings.extend(lbc)
         except Exception as e:
             print(f"[scraper] LBC erreur: {e}")
