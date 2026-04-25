@@ -1,6 +1,8 @@
 """
-Scraper direct — LeBonCoin (API JSON), LaCentrale, AutoScout24.
-fetch_listings() retourne une liste de Listing compatibles avec main.py.
+Scraper multi-sources : LeBonCoin (curl_cffi Chrome impers.), AutoScout24,
+LaCentrale (curl_cffi), OuestFrance-Auto, Argus, ParuVendu.
+
+curl_cffi impersonne les fingerprints TLS/HTTP2 de Chrome → contourne Cloudflare.
 """
 from __future__ import annotations
 
@@ -13,6 +15,14 @@ from typing import List, Optional
 import requests
 from bs4 import BeautifulSoup
 
+try:
+    from curl_cffi import requests as cf_requests
+    HAS_CURL_CFFI = True
+    print("[scraper] curl_cffi disponible — contournement Cloudflare activé")
+except ImportError:
+    HAS_CURL_CFFI = False
+    print("[scraper] curl_cffi non disponible — fallback requests standard")
+
 from models import Listing
 from parsers.common import extract_price, extract_year, extract_mileage, clean_text
 
@@ -20,72 +30,79 @@ from parsers.common import extract_price, extract_year, extract_mileage, clean_t
 # ---------------------------------------------------------------------------
 # Headers
 # ---------------------------------------------------------------------------
+UA_CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
 HEADERS_HTML = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "User-Agent": UA_CHROME,
     "Accept-Language": "fr-FR,fr;q=0.9",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
-}
-
-# Clé API publique utilisée par le site LeBonCoin lui-même
-LBC_API_KEY = "ba0c2dad52b3565fd92a81af2b6386d7"
-HEADERS_LBC = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "fr-FR,fr;q=0.9",
-    "Content-Type": "application/json",
-    "api_key": LBC_API_KEY,
-    "Origin": "https://www.leboncoin.fr",
-    "Referer": "https://www.leboncoin.fr/",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-CH-UA": '"Chromium";v="124", "Google Chrome";v="124"',
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": '"macOS"',
 }
 
 
 # ---------------------------------------------------------------------------
-# Config des recherches
+# Session CF (curl_cffi ou fallback requests)
 # ---------------------------------------------------------------------------
-LBC_SEARCHES = [
-    {"text": "clio 3",      "label": "LBC Clio 3"},
-    {"text": "clio iii",    "label": "LBC Clio III"},
-    {"text": "peugeot 207", "label": "LBC 207"},
-]
+def _make_cf_session():
+    """Retourne une session curl_cffi (Chrome impers.) ou requests standard."""
+    if HAS_CURL_CFFI:
+        s = cf_requests.Session(impersonate="chrome124")
+        return s, True
+    return requests.Session(), False
 
-SEARCH_URLS = [
-    # AutoScout24 — fonctionne bien
-    {
-        "site": "autoscout24", "method": "html",
-        "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C",
-        "label": "AS24 Clio",
-    },
-    {
-        "site": "autoscout24", "method": "html",
-        "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C",
-        "label": "AS24 207",
-    },
-    # LaCentrale
-    {
-        "site": "lacentrale", "method": "html",
-        "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO+3&mileageMax=260000&priceMax=3000",
-        "label": "LaCentrale Clio 3",
-    },
-    {
-        "site": "lacentrale", "method": "html",
-        "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000&priceMax=3000",
-        "label": "LaCentrale 207",
-    },
-]
+
+def _cf_get(session, url: str, *, is_cf: bool, timeout: int = 30, retries: int = 2):
+    """GET avec retry. Retourne un objet response ou None."""
+    for attempt in range(retries + 1):
+        try:
+            if is_cf:
+                r = session.get(url, headers=HEADERS_HTML, timeout=timeout)
+            else:
+                r = session.get(url, headers=HEADERS_HTML, timeout=timeout)
+            print(f"    [HTTP {r.status_code}] {url[:80]}")
+            if r.status_code == 200:
+                return r
+            if r.status_code in (403, 429, 503):
+                print(f"    [CF bloqué?] {r.status_code} — tentative {attempt+1}/{retries+1}")
+                if attempt < retries:
+                    time.sleep(5 * (attempt + 1))
+        except Exception as e:
+            print(f"    [Erreur réseau] {e} (tentative {attempt+1})")
+            if attempt < retries:
+                time.sleep(3)
+    return None
+
+
+def _cf_post(session, url: str, json_payload: dict, headers: dict, *, is_cf: bool, timeout: int = 30):
+    """POST JSON avec curl_cffi ou requests."""
+    try:
+        if is_cf:
+            r = session.post(url, json=json_payload, headers=headers, timeout=timeout)
+        else:
+            r = session.post(url, json=json_payload, headers=headers, timeout=timeout)
+        return r
+    except Exception as e:
+        print(f"    [Erreur POST] {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
-# Utilitaires
+# Utilitaires JSON
 # ---------------------------------------------------------------------------
 def _extract_next_data(html: str) -> Optional[dict]:
-    m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>([^<]+)</script>', html, re.DOTALL)
+    m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
     if not m:
         return None
     try:
         return json.loads(m.group(1))
-    except (json.JSONDecodeError, ValueError):
+    except Exception:
         return None
 
 
@@ -105,13 +122,13 @@ def _parse_price(val) -> Optional[int]:
         return None
     if isinstance(val, (int, float)) and val > 0:
         v = int(val)
-        return v if 100 < v < 100000 else None
+        return v if 100 < v < 100_000 else None
     if isinstance(val, list) and val:
         return _parse_price(val[0])
     if isinstance(val, str):
         digits = re.sub(r"[^\d]", "", val)
         v = int(digits) if digits else None
-        return v if v and 100 < v < 100000 else None
+        return v if v and 100 < v < 100_000 else None
     return None
 
 
@@ -120,11 +137,11 @@ def _parse_km(val) -> Optional[int]:
         return None
     if isinstance(val, (int, float)):
         v = int(val)
-        return v if 0 < v < 1000000 else None
+        return v if 0 < v < 1_000_000 else None
     if isinstance(val, str):
         digits = re.sub(r"[^\d]", "", val)
         v = int(digits) if digits else None
-        return v if v and 0 < v < 1000000 else None
+        return v if v and 0 < v < 1_000_000 else None
     return None
 
 
@@ -140,115 +157,140 @@ def _parse_year(val) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# LeBonCoin — API JSON interne
+# LeBonCoin — API interne (clé publique) via curl_cffi
 # ---------------------------------------------------------------------------
-def _fetch_leboncoin_api(session: requests.Session, search_text: str, label: str) -> List[Listing]:
-    """
-    Utilise l'API interne LeBonCoin (endpoint adfinder) pour récupérer
-    les annonces en JSON — non bloqué contrairement au scraping HTML.
-    """
-    url = "https://api.leboncoin.fr/api/adfinder/v1/search"
-    payload = {
-        "limit": 35,
-        "limit_alu": 3,
-        "filters": {
-            "category": {"id": "2"},
-            "keywords": {"text": search_text, "type": "all"},
-            "ranges": {
-                "price": {"max": 3000},
-                "mileage": {"max": 260000},
-            },
-            "location": {},
-        },
-        "sort_by": "time",
-        "sort_order": "desc",
-        "owner": {"type": "all"},
+def _fetch_lbc(session, is_cf: bool) -> List[Listing]:
+    """Scrape LeBonCoin via API JSON interne + fallback HTML."""
+    url_api = "https://api.leboncoin.fr/api/adfinder/v1/search"
+    headers_api = {
+        "User-Agent": UA_CHROME,
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+        "Content-Type": "application/json",
+        "api_key": "ba0c2dad52b3565fd92a81af2b6386d7",
+        "Origin": "https://www.leboncoin.fr",
+        "Referer": "https://www.leboncoin.fr/",
+        "X-Source-Type": "web",
     }
 
-    try:
-        r = session.post(url, json=payload, headers=HEADERS_LBC, timeout=20)
-        print(f"  [{label}] API LBC HTTP {r.status_code}")
-        if r.status_code != 200:
-            return []
-        data = r.json()
-    except Exception as e:
-        print(f"  [{label}] Erreur API LBC: {e}")
-        return []
+    searches = [("clio 3", "clio"), ("clio iii", "clio"), ("peugeot 207", "207")]
+    all_listings: List[Listing] = []
+    api_total = 0
 
+    print("[scraper] LeBonCoin API...")
+    for text, _ in searches:
+        payload = {
+            "limit": 35,
+            "filters": {
+                "category": {"id": "2"},
+                "keywords": {"text": text, "type": "all"},
+                "ranges": {
+                    "price": {"max": 3000},
+                    "mileage": {"max": 260000},
+                },
+                "location": {},
+            },
+            "sort_by": "time",
+            "sort_order": "desc",
+            "owner": {"type": "all"},
+        }
+        r = _cf_post(session, url_api, payload, headers_api, is_cf=is_cf)
+        if r and r.status_code == 200:
+            try:
+                data = r.json()
+                lst = _parse_lbc_json(data)
+                print(f"  [LBC API '{text}'] {len(lst)} annonces")
+                all_listings.extend(lst)
+                api_total += len(lst)
+            except Exception as e:
+                print(f"  [LBC API '{text}'] parse error: {e}")
+        else:
+            code = r.status_code if r else "err"
+            print(f"  [LBC API '{text}'] HTTP {code}")
+        time.sleep(1.5)
+
+    if api_total > 0:
+        return all_listings
+
+    # Fallback HTML si API bloquée
+    print("[scraper] LBC API = 0 → fallback HTML (CF bypass)...")
+    # Warmup cookie
+    _cf_get(session, "https://www.leboncoin.fr/", is_cf=is_cf, retries=0)
+    time.sleep(2)
+
+    for text, _ in searches:
+        url = f"https://www.leboncoin.fr/recherche?category=2&text={requests.utils.quote(text)}&price_max=3000&mileage_max=260000&sort=time&order=desc"
+        r = _cf_get(session, url, is_cf=is_cf)
+        if r:
+            lst = _parse_lbc_next_data(r.text)
+            print(f"  [LBC HTML '{text}'] {len(lst)} annonces")
+            all_listings.extend(lst)
+        time.sleep(2)
+
+    return all_listings
+
+
+def _parse_lbc_json(data: dict) -> List[Listing]:
     ads = data.get("ads") or []
-    print(f"  [{label}] {len(ads)} annonces")
     listings = []
-
     for ad in ads:
         try:
             listing_id = str(ad.get("list_id", ""))
             if not listing_id:
                 continue
-
-            title = ad.get("subject", "") or "Annonce LeBonCoin"
-
-            # Prix
+            title = ad.get("subject", "") or "LeBonCoin"
             price = _parse_price(ad.get("price"))
-            if price is None:
-                price_list = ad.get("price", [])
-                if isinstance(price_list, list) and price_list:
-                    price = _parse_price(price_list[0])
-
-            # Attributs (km, année)
+            if price is None and isinstance(ad.get("price"), list):
+                price = _parse_price(ad["price"][0] if ad["price"] else None)
             attrs = ad.get("attributes", [])
-            km = None
-            year = None
+            km, year = None, None
             if isinstance(attrs, list):
                 attr_map = {a.get("key"): a.get("value") for a in attrs if isinstance(a, dict)}
                 km = _parse_km(attr_map.get("mileage"))
-                year_raw = attr_map.get("regdate") or attr_map.get("year")
-                year = _parse_year(year_raw)
-            elif isinstance(attrs, dict):
-                km = _parse_km(attrs.get("mileage"))
-                year = _parse_year(attrs.get("regdate") or attrs.get("year"))
-
-            # Localisation
-            loc_obj = ad.get("location") or {}
-            city = loc_obj.get("city", "") if isinstance(loc_obj, dict) else ""
-            dept = str(loc_obj.get("department_id", "")) if isinstance(loc_obj, dict) else ""
+                year = _parse_year(attr_map.get("regdate") or attr_map.get("year"))
+            loc = ad.get("location") or {}
+            city = loc.get("city", "") if isinstance(loc, dict) else ""
+            dept = str(loc.get("department_id", "")) if isinstance(loc, dict) else ""
             location = f"{city} ({dept})" if city and dept else city or None
-
-            # Image
             images = ad.get("images") or {}
             image_url = None
             if isinstance(images, dict):
-                thumbs = images.get("thumb_url") or images.get("small_url") or images.get("urls", [None])[0]
-                image_url = thumbs
-            elif isinstance(images, list) and images:
-                image_url = images[0].get("small_url") if isinstance(images[0], dict) else None
-
+                image_url = images.get("thumb_url") or images.get("small_url")
+                if not image_url and images.get("urls"):
+                    image_url = images["urls"][0] if images["urls"] else None
             listings.append(Listing(
-                site="leboncoin",
-                listing_id=listing_id,
-                title=clean_text(title)[:200],
-                price=price,
-                year=year,
-                mileage=km,
-                location=location,
+                site="leboncoin", listing_id=listing_id,
+                title=clean_text(title)[:200], price=price, year=year,
+                mileage=km, location=location,
                 url=f"https://www.leboncoin.fr/ad/voitures/{listing_id}",
                 image_url=image_url,
                 description=clean_text(ad.get("body", title))[:300],
             ))
         except Exception:
             continue
-
     return listings
 
 
+def _parse_lbc_next_data(html: str) -> List[Listing]:
+    data = _extract_next_data(html)
+    if not data:
+        return []
+    ads = (
+        _safe_get(data, "props", "pageProps", "searchData", "ads")
+        or _safe_get(data, "props", "pageProps", "initialData", "ads")
+        or _safe_get(data, "props", "pageProps", "ads")
+        or []
+    )
+    return _parse_lbc_json({"ads": ads})
+
+
 # ---------------------------------------------------------------------------
-# AutoScout24 — __NEXT_DATA__ avec multi-chemins
+# AutoScout24
 # ---------------------------------------------------------------------------
 def _parse_autoscout24(html: str, source_url: str) -> List[Listing]:
     listings: List[Listing] = []
     data = _extract_next_data(html)
-
     if not data:
-        print("    [AS24] __NEXT_DATA__ introuvable, fallback HTML")
         return _parse_autoscout24_html(html)
 
     page_props = _safe_get(data, "props", "pageProps") or {}
@@ -257,17 +299,13 @@ def _parse_autoscout24(html: str, source_url: str) -> List[Listing]:
         or page_props.get("ads")
         or _safe_get(page_props, "searchResponse", "listings")
         or _safe_get(page_props, "searchResponse", "ads")
-        or _safe_get(page_props, "initialState", "listings")
         or []
     )
 
     print(f"    [AS24] {len(ads)} annonces dans __NEXT_DATA__")
     if ads:
-        print(f"    [AS24 debug] clés: {list(ads[0].keys())[:12]}")
-        # Debug prix pour le 1er item
         ad0 = ads[0]
-        print(f"    [AS24 debug] price={ad0.get('price')} prices={ad0.get('prices')} "
-              f"vehicle_keys={list(ad0.get('vehicle', {}).keys())[:8]}")
+        print(f"    [AS24 debug] clés={list(ad0.keys())[:10]} | price={ad0.get('price')} | prices={ad0.get('prices')}")
 
     for ad in ads:
         try:
@@ -277,46 +315,42 @@ def _parse_autoscout24(html: str, source_url: str) -> List[Listing]:
 
             vehicle = ad.get("vehicle") or {}
             tracking = ad.get("tracking") or {}
-
-            # Titre
             make = vehicle.get("make") or tracking.get("make") or ad.get("make") or ""
             model = vehicle.get("model") or tracking.get("model") or ad.get("model") or ""
             version = vehicle.get("version") or vehicle.get("modelVersion") or ""
-            title = (ad.get("title") or
-                     " ".join(filter(None, [str(make), str(model), str(version)])).strip() or
-                     "AutoScout24")
+            title = ad.get("title") or " ".join(filter(None, [str(make), str(model), str(version)])).strip() or "AutoScout24"
 
-            # Prix — 4 chemins
             price = None
-            prices_obj = ad.get("prices") or {}
-            if isinstance(prices_obj, dict):
-                pub = prices_obj.get("public") or {}
-                price = _parse_price(pub.get("priceRaw") or pub.get("price") or pub.get("value"))
-            if price is None:
-                price_obj = ad.get("price") or {}
-                if isinstance(price_obj, dict):
-                    price = _parse_price(
-                        price_obj.get("value") or price_obj.get("amount") or
-                        price_obj.get("priceRaw") or price_obj.get("raw")
-                    )
-                else:
-                    price = _parse_price(price_obj)
-            if price is None:
-                price = _parse_price(ad.get("priceRaw") or ad.get("priceValue") or
-                                     vehicle.get("price"))
+            for p_val in [
+                _safe_get(ad, "prices", "public", "priceRaw"),
+                _safe_get(ad, "prices", "public", "price"),
+                _safe_get(ad, "price", "value"),
+                _safe_get(ad, "price", "amount"),
+                _safe_get(ad, "price", "priceRaw"),
+                ad.get("priceRaw"), ad.get("priceValue"),
+                vehicle.get("price"),
+            ]:
+                price = _parse_price(p_val)
+                if price:
+                    break
 
-            # Km — 3 chemins
-            km = (_parse_km(vehicle.get("mileage") or vehicle.get("km")) or
-                  _parse_km(ad.get("mileage") or ad.get("km")) or
-                  _parse_km(tracking.get("mileage")))
+            km = None
+            for km_val in [vehicle.get("mileage"), vehicle.get("km"), ad.get("mileage"), ad.get("km"), tracking.get("mileage")]:
+                km = _parse_km(km_val)
+                if km:
+                    break
 
-            # Année — 4 chemins
-            year = (_parse_year(vehicle.get("firstRegistrationYear")) or
-                    _parse_year(vehicle.get("firstRegistration")) or
-                    _parse_year(ad.get("firstRegistration") or ad.get("year")) or
-                    _parse_year(vehicle.get("registrationDate")))
+            year = None
+            for y_val in [
+                vehicle.get("firstRegistrationYear"),
+                vehicle.get("firstRegistration"),
+                ad.get("firstRegistration"), ad.get("year"),
+                vehicle.get("registrationDate"),
+            ]:
+                year = _parse_year(y_val)
+                if year:
+                    break
 
-            # Localisation
             loc = ad.get("location") or {}
             location = None
             if isinstance(loc, dict):
@@ -324,38 +358,27 @@ def _parse_autoscout24(html: str, source_url: str) -> List[Listing]:
                 zip_code = str(loc.get("zip") or loc.get("postalCode") or "")
                 location = f"{city} ({zip_code[:5]})" if city else None
 
-            # Image
             images = ad.get("images") or ad.get("photos") or []
             image_url = None
             if isinstance(images, list) and images:
                 i0 = images[0]
                 image_url = (i0.get("url") or i0.get("src") or i0.get("uri")) if isinstance(i0, dict) else i0
 
-            # URL
             ad_url = ad.get("url") or f"https://www.autoscout24.fr/offres/{listing_id}"
             if not str(ad_url).startswith("http"):
                 ad_url = "https://www.autoscout24.fr" + str(ad_url)
 
             listings.append(Listing(
-                site="autoscout24",
-                listing_id=listing_id,
-                title=clean_text(str(title))[:200],
-                price=price,
-                year=year,
-                mileage=km,
-                location=location,
-                url=ad_url,
-                image_url=image_url,
+                site="autoscout24", listing_id=listing_id,
+                title=clean_text(str(title))[:200], price=price,
+                year=year, mileage=km, location=location,
+                url=ad_url, image_url=image_url,
                 description=clean_text(str(title)),
             ))
         except Exception:
-            traceback.print_exc()
             continue
 
-    if not listings:
-        return _parse_autoscout24_html(html)
-
-    return listings
+    return listings or _parse_autoscout24_html(html)
 
 
 def _parse_autoscout24_html(html: str) -> List[Listing]:
@@ -365,104 +388,77 @@ def _parse_autoscout24_html(html: str) -> List[Listing]:
     seen = set()
     for a in soup.find_all("a", href=True):
         m = id_pat.search(a["href"])
-        if not m:
+        if not m or m.group(1) in seen:
             continue
-        listing_id = m.group(1)
-        if listing_id in seen:
-            continue
-        seen.add(listing_id)
+        seen.add(m.group(1))
         block = a
         for _ in range(6):
             p = block.parent
-            if not p:
-                break
-            if len(p.get_text(strip=True)) > 30:
-                block = p
+            if not p or len(p.get_text(strip=True)) > 30:
+                block = p or block
                 break
             block = p
-        block_text = clean_text(block.get_text(" ", strip=True))
+        bt = clean_text(block.get_text(" ", strip=True))
         listings.append(Listing(
-            site="autoscout24",
-            listing_id=listing_id,
+            site="autoscout24", listing_id=m.group(1),
             title=clean_text(a.get_text(" ", strip=True))[:200] or "AutoScout24",
-            price=extract_price(block_text),
-            year=extract_year(block_text),
-            mileage=extract_mileage(block_text),
-            location=None,
-            url=f"https://www.autoscout24.fr/offres/{listing_id}",
+            price=extract_price(bt), year=extract_year(bt), mileage=extract_mileage(bt),
+            location=None, url=f"https://www.autoscout24.fr/offres/{m.group(1)}",
         ))
     return listings
 
 
 # ---------------------------------------------------------------------------
-# LaCentrale — __NEXT_DATA__
+# LaCentrale — via curl_cffi
 # ---------------------------------------------------------------------------
 def _parse_lacentrale(html: str, source_url: str) -> List[Listing]:
     listings: List[Listing] = []
     data = _extract_next_data(html)
-
     if data:
         page_props = _safe_get(data, "props", "pageProps") or {}
         vehicles = (
-            page_props.get("vehicles") or page_props.get("listings") or
-            _safe_get(page_props, "searchResult", "vehicles") or
-            _safe_get(page_props, "searchResult", "listings") or
-            page_props.get("ads") or []
+            page_props.get("vehicles") or page_props.get("listings")
+            or _safe_get(page_props, "searchResult", "vehicles")
+            or _safe_get(page_props, "searchResult", "listings")
+            or page_props.get("ads") or []
         )
-
         for v in vehicles:
             try:
                 listing_id = str(v.get("id") or v.get("listingId") or v.get("adId") or "")
                 if not listing_id:
                     continue
-
                 make = v.get("make") or v.get("brand") or ""
                 model = v.get("model") or v.get("modelLabel") or ""
                 version = v.get("version") or v.get("versionLabel") or ""
                 title = " ".join(filter(None, [str(make), str(model), str(version)])).strip() or "LaCentrale"
-
                 price_raw = v.get("price")
                 if isinstance(price_raw, dict):
                     price_raw = price_raw.get("value") or price_raw.get("amount")
                 price = _parse_price(price_raw)
-
                 km = _parse_km(v.get("mileage") or v.get("km"))
-                year = _parse_year(
-                    v.get("year") or v.get("firstRegistrationDate") or v.get("registrationDate")
-                )
-
+                year = _parse_year(v.get("year") or v.get("firstRegistrationDate") or v.get("registrationDate"))
                 loc = v.get("location") or v.get("localisation") or {}
                 location = None
                 if isinstance(loc, dict):
                     city = loc.get("city") or loc.get("commune") or ""
-                    dept = str(loc.get("zipCode") or loc.get("codePostal") or loc.get("departmentCode") or "")
+                    dept = str(loc.get("zipCode") or loc.get("codePostal") or "")
                     location = f"{city} ({dept[:2]})" if city and dept else city or None
-
                 photos = v.get("photos") or v.get("images") or []
                 image_url = None
                 if isinstance(photos, list) and photos:
                     p0 = photos[0]
                     image_url = (p0.get("url") or p0.get("src")) if isinstance(p0, dict) else p0
-
                 listings.append(Listing(
-                    site="lacentrale",
-                    listing_id=listing_id,
-                    title=clean_text(title)[:200],
-                    price=price,
-                    year=year,
-                    mileage=km,
-                    location=location,
+                    site="lacentrale", listing_id=listing_id,
+                    title=clean_text(title)[:200], price=price, year=year,
+                    mileage=km, location=location,
                     url=f"https://www.lacentrale.fr/auto-occasion-annonce-{listing_id}.html",
-                    image_url=image_url,
-                    description=clean_text(title),
+                    image_url=image_url, description=clean_text(title),
                 ))
             except Exception:
                 continue
 
-    if not listings:
-        listings = _parse_lacentrale_html(html)
-
-    return listings
+    return listings or _parse_lacentrale_html(html)
 
 
 def _parse_lacentrale_html(html: str) -> List[Listing]:
@@ -472,100 +468,244 @@ def _parse_lacentrale_html(html: str) -> List[Listing]:
     seen = set()
     for a in soup.find_all("a", href=True):
         m = id_pat.search(a["href"])
-        if not m:
+        if not m or m.group(1) in seen:
             continue
-        listing_id = m.group(1)
-        if listing_id in seen:
-            continue
-        seen.add(listing_id)
+        seen.add(m.group(1))
         block = a
         for _ in range(5):
             p = block.parent
-            if not p:
-                break
-            if len(p.get_text(strip=True)) > 30:
-                block = p
+            if not p or len(p.get_text(strip=True)) > 30:
+                block = p or block
                 break
             block = p
-        block_text = clean_text(block.get_text(" ", strip=True))
+        bt = clean_text(block.get_text(" ", strip=True))
         listings.append(Listing(
-            site="lacentrale",
-            listing_id=listing_id,
+            site="lacentrale", listing_id=m.group(1),
             title=clean_text(a.get_text(" ", strip=True))[:200] or "LaCentrale",
-            price=extract_price(block_text),
-            year=extract_year(block_text),
-            mileage=extract_mileage(block_text),
-            location=None,
-            url=f"https://www.lacentrale.fr/auto-occasion-annonce-{listing_id}.html",
+            price=extract_price(bt), year=extract_year(bt), mileage=extract_mileage(bt),
+            location=None, url=f"https://www.lacentrale.fr/auto-occasion-annonce-{m.group(1)}.html",
         ))
     return listings
 
 
 # ---------------------------------------------------------------------------
-# Dispatcher HTML
+# OuestFrance-Auto — grand site régional, hors Cloudflare
+# ---------------------------------------------------------------------------
+def _parse_ouestfrance(html: str, source_url: str) -> List[Listing]:
+    listings = []
+    soup = BeautifulSoup(html, "lxml")
+
+    # Structure OuestFrance-Auto: articles avec data-id ou liens /annonces/detail/...
+    id_pat = re.compile(r"/annonces/(?:detail|fiche)/[^/?#]*[/-](\d{6,})", re.IGNORECASE)
+    id_pat2 = re.compile(r"[?&]id=(\d{5,})")
+    seen = set()
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        m = id_pat.search(href) or id_pat2.search(href)
+        if not m:
+            continue
+        lid = m.group(1)
+        if lid in seen:
+            continue
+        seen.add(lid)
+
+        # Remonter pour trouver le bloc annonce
+        block = a
+        for _ in range(7):
+            p = block.parent
+            if not p:
+                break
+            txt = p.get_text(strip=True)
+            if len(txt) > 50:
+                block = p
+                break
+            block = p
+
+        bt = clean_text(block.get_text(" ", strip=True))
+        full_url = href if href.startswith("http") else "https://www.ouestfrance-auto.com" + href
+        title = clean_text(a.get_text(" ", strip=True))[:200] or bt[:80] or "OuestFrance"
+        listings.append(Listing(
+            site="ouestfrance", listing_id=lid,
+            title=title,
+            price=extract_price(bt), year=extract_year(bt), mileage=extract_mileage(bt),
+            location=None, url=full_url,
+        ))
+
+    # Fallback : chercher JSON embarqué (Next.js ou autre)
+    if not listings:
+        data = _extract_next_data(html)
+        if data:
+            page_props = _safe_get(data, "props", "pageProps") or {}
+            ads = (
+                page_props.get("ads") or page_props.get("listings")
+                or page_props.get("vehicles") or []
+            )
+            for ad in ads:
+                try:
+                    lid = str(ad.get("id") or ad.get("adId") or "")
+                    if not lid or lid in seen:
+                        continue
+                    seen.add(lid)
+                    title = ad.get("title") or ad.get("subject") or "OuestFrance"
+                    listings.append(Listing(
+                        site="ouestfrance", listing_id=lid,
+                        title=clean_text(str(title))[:200],
+                        price=_parse_price(ad.get("price")),
+                        year=_parse_year(ad.get("year") or ad.get("firstRegistration")),
+                        mileage=_parse_km(ad.get("mileage") or ad.get("km")),
+                        location=None,
+                        url=f"https://www.ouestfrance-auto.com/annonces/detail/{lid}",
+                    ))
+                except Exception:
+                    continue
+
+    return listings
+
+
+# ---------------------------------------------------------------------------
+# Argus (L'Argus occasions)
+# ---------------------------------------------------------------------------
+def _parse_argus(html: str, source_url: str) -> List[Listing]:
+    listings = []
+    soup = BeautifulSoup(html, "lxml")
+    id_pat = re.compile(r"/voiture-occasion/vente/[^/]+/(\d{6,})", re.IGNORECASE)
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        m = id_pat.search(a["href"])
+        if not m or m.group(1) in seen:
+            continue
+        seen.add(m.group(1))
+        block = a
+        for _ in range(6):
+            p = block.parent
+            if not p or len(p.get_text(strip=True)) > 30:
+                block = p or block
+                break
+            block = p
+        bt = clean_text(block.get_text(" ", strip=True))
+        full_url = a["href"] if a["href"].startswith("http") else "https://www.largus.fr" + a["href"]
+        listings.append(Listing(
+            site="argus", listing_id=m.group(1),
+            title=clean_text(a.get_text(" ", strip=True))[:200] or "Argus",
+            price=extract_price(bt), year=extract_year(bt), mileage=extract_mileage(bt),
+            location=None, url=full_url,
+        ))
+    return listings
+
+
+# ---------------------------------------------------------------------------
+# ParuVendu
+# ---------------------------------------------------------------------------
+def _parse_paruvendu(html: str, source_url: str) -> List[Listing]:
+    listings = []
+    soup = BeautifulSoup(html, "lxml")
+    id_pat = re.compile(r"annonce-(\d{6,})", re.IGNORECASE)
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "annonce" not in href.lower():
+            continue
+        m = id_pat.search(href)
+        if not m or m.group(1) in seen:
+            continue
+        seen.add(m.group(1))
+        block = a
+        for _ in range(6):
+            p = block.parent
+            if not p or len(p.get_text(strip=True)) > 30:
+                block = p or block
+                break
+            block = p
+        bt = clean_text(block.get_text(" ", strip=True))
+        full_url = href if href.startswith("http") else "https://www.paruvendu.fr" + href
+        listings.append(Listing(
+            site="paruvendu", listing_id=m.group(1),
+            title=clean_text(a.get_text(" ", strip=True))[:200] or "ParuVendu",
+            price=extract_price(bt), year=extract_year(bt), mileage=extract_mileage(bt),
+            location=None, url=full_url,
+        ))
+    return listings
+
+
+# ---------------------------------------------------------------------------
+# Config sources HTML (hors LBC qui a son propre pipeline)
 # ---------------------------------------------------------------------------
 SITE_PARSERS = {
-    "lacentrale": _parse_lacentrale,
     "autoscout24": _parse_autoscout24,
+    "lacentrale": _parse_lacentrale,
+    "ouestfrance": _parse_ouestfrance,
+    "argus": _parse_argus,
+    "paruvendu": _parse_paruvendu,
 }
 
+HTML_SOURCES = [
+    # AutoScout24
+    {"site": "autoscout24", "label": "AS24 Clio",
+     "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
+    {"site": "autoscout24", "label": "AS24 207",
+     "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
+    # LaCentrale (CF bypass via curl_cffi)
+    {"site": "lacentrale", "label": "LaCentrale Clio 3",
+     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO+3&mileageMax=260000&priceMax=3000"},
+    {"site": "lacentrale", "label": "LaCentrale 207",
+     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000&priceMax=3000"},
+    # OuestFrance-Auto (pas de Cloudflare)
+    {"site": "ouestfrance", "label": "OFA Clio",
+     "url": "https://www.ouestfrance-auto.com/annonces/voitures/renault/clio/?tri=date_desc&prix_max=3000&km_max=260000"},
+    {"site": "ouestfrance", "label": "OFA 207",
+     "url": "https://www.ouestfrance-auto.com/annonces/voitures/peugeot/207/?tri=date_desc&prix_max=3000&km_max=260000"},
+    # Argus
+    {"site": "argus", "label": "Argus Clio 3",
+     "url": "https://www.largus.fr/voitures-occasions.php?brand=Renault&model=Clio+3&pricemax=3000&kmmax=260000"},
+    {"site": "argus", "label": "Argus 207",
+     "url": "https://www.largus.fr/voitures-occasions.php?brand=Peugeot&model=207&pricemax=3000&kmmax=260000"},
+    # ParuVendu
+    {"site": "paruvendu", "label": "ParuVendu Clio",
+     "url": "https://www.paruvendu.fr/auto-moto-bateau/voitures/renault/clio/?px2=3000&km2=260000&typeV=0PP"},
+    {"site": "paruvendu", "label": "ParuVendu 207",
+     "url": "https://www.paruvendu.fr/auto-moto-bateau/voitures/peugeot/207/?px2=3000&km2=260000&typeV=0PP"},
+]
 
-def _fetch_html(session: requests.Session, entry: dict, retries: int = 2) -> List[Listing]:
+
+def _fetch_html_source(session, is_cf: bool, entry: dict) -> List[Listing]:
     site = entry["site"]
     url = entry["url"]
     label = entry.get("label", url)
     parser = SITE_PARSERS[site]
 
-    for attempt in range(retries + 1):
-        try:
-            r = session.get(url, timeout=25, headers=HEADERS_HTML, allow_redirects=True)
-            if r.status_code == 200:
-                listings = parser(r.text, url)
-                print(f"  [{label}] HTTP 200 — {len(listings)} annonces")
-                return listings
-            elif r.status_code in (403, 429):
-                wait = 5 * (attempt + 1)
-                print(f"  [{label}] HTTP {r.status_code} bloqué (tentative {attempt+1})")
-                if attempt < retries:
-                    time.sleep(wait)
-            else:
-                print(f"  [{label}] HTTP {r.status_code}")
-                return []
-        except requests.RequestException as e:
-            print(f"  [{label}] Erreur réseau: {e}")
-            if attempt < retries:
-                time.sleep(3)
-
+    r = _cf_get(session, url, is_cf=is_cf)
+    if r:
+        listings = parser(r.text, url)
+        print(f"  [{label}] {len(listings)} annonces")
+        return listings
     return []
 
 
 # ---------------------------------------------------------------------------
 # Point d'entrée public
 # ---------------------------------------------------------------------------
-def fetch_listings(urls: Optional[List[dict]] = None) -> List[Listing]:
-    session = requests.Session()
+def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
+    session, is_cf = _make_cf_session()
     all_listings: List[Listing] = []
 
-    # 1. LeBonCoin via API JSON interne
-    print("[scraper] LeBonCoin API...")
-    for search in LBC_SEARCHES:
-        try:
-            listings = _fetch_leboncoin_api(session, search["text"], search["label"])
-            all_listings.extend(listings)
-        except Exception as e:
-            print(f"  [{search['label']}] Exception: {e}")
-        time.sleep(1.0)
+    # 1. LeBonCoin (API + fallback HTML, curl_cffi)
+    try:
+        lbc = _fetch_lbc(session, is_cf)
+        all_listings.extend(lbc)
+    except Exception as e:
+        print(f"[scraper] LBC erreur générale: {e}")
+        traceback.print_exc()
 
-    # 2. AutoScout24 + LaCentrale via HTML
-    targets = urls or SEARCH_URLS
-    print(f"[scraper] HTML sources ({len(targets)})...")
-    for entry in targets:
+    # 2. Sources HTML (AS24, LaCentrale, OuestFrance, Argus, ParuVendu)
+    src_list = sources or HTML_SOURCES
+    print(f"[scraper] Sources HTML ({len(src_list)})...")
+    for entry in src_list:
         try:
-            listings = _fetch_html(session, entry)
-            all_listings.extend(listings)
+            lst = _fetch_html_source(session, is_cf, entry)
+            all_listings.extend(lst)
         except Exception as e:
             print(f"  [{entry.get('label')}] Exception: {e}")
-            traceback.print_exc()
         time.sleep(1.5)
 
     # Dédup
