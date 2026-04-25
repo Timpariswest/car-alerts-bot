@@ -324,6 +324,7 @@ def _parse_autoscout24(html: str, source_url: str) -> List[Listing]:
             for p_val in [
                 _safe_get(ad, "prices", "public", "priceRaw"),
                 _safe_get(ad, "prices", "public", "price"),
+                _safe_get(ad, "price", "priceFormatted"),   # nouveau format AS24
                 _safe_get(ad, "price", "value"),
                 _safe_get(ad, "price", "amount"),
                 _safe_get(ad, "price", "priceRaw"),
@@ -640,26 +641,13 @@ SITE_PARSERS = {
 }
 
 HTML_SOURCES = [
-    # AutoScout24
+    # AutoScout24 — seule source qui répond (LBC/LaCentrale bloqués par CF, ParuVendu mort)
     {"site": "autoscout24", "label": "AS24 Clio",
      "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
     {"site": "autoscout24", "label": "AS24 207",
      "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
-    # LaCentrale (CF bypass via curl_cffi)
-    {"site": "lacentrale", "label": "LaCentrale Clio 3",
-     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO+3&mileageMax=260000&priceMax=3000"},
-    {"site": "lacentrale", "label": "LaCentrale 207",
-     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000&priceMax=3000"},
-    # Argus
-    {"site": "argus", "label": "Argus Clio 3",
-     "url": "https://www.largus.fr/voitures-occasions.php?brand=Renault&model=Clio+3&pricemax=3000&kmmax=260000"},
-    {"site": "argus", "label": "Argus 207",
-     "url": "https://www.largus.fr/voitures-occasions.php?brand=Peugeot&model=207&pricemax=3000&kmmax=260000"},
-    # ParuVendu
-    {"site": "paruvendu", "label": "ParuVendu Clio",
-     "url": "https://www.paruvendu.fr/auto-moto-bateau/voitures/renault/clio/?px2=3000&km2=260000&typeV=0PP"},
-    {"site": "paruvendu", "label": "ParuVendu 207",
-     "url": "https://www.paruvendu.fr/auto-moto-bateau/voitures/peugeot/207/?px2=3000&km2=260000&typeV=0PP"},
+    # Argus (bloqué CF pour l'instant, gardé pour future tentative)
+    # {"site": "argus", ...},
 ]
 
 
@@ -684,15 +672,8 @@ def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
     session, is_cf = _make_cf_session()
     all_listings: List[Listing] = []
 
-    # 1. LeBonCoin (API + fallback HTML, curl_cffi)
-    try:
-        lbc = _fetch_lbc(session, is_cf)
-        all_listings.extend(lbc)
-    except Exception as e:
-        print(f"[scraper] LBC erreur générale: {e}")
-        traceback.print_exc()
-
-    # 2. Sources HTML (AS24, LaCentrale, OuestFrance, Argus, ParuVendu)
+    # LBC désactivé : bloqué Cloudflare Enterprise depuis GitHub Actions IPs (403 même curl_cffi)
+    # 1. Sources HTML
     src_list = sources or HTML_SOURCES
     print(f"[scraper] Sources HTML ({len(src_list)})...")
     for entry in src_list:
