@@ -6,22 +6,21 @@ searches:
     keywords_nice: ["dynamique", "expression", "tce", "1.2", "1.5", "dci", "entretien", "révision", "distribution", "courroie"]
     # Rejeter si ces mots apparaissent (mauvais modèle ou mauvais état)
     keywords_bad: ["clio 4", "clio iv", "clio4", "clio 5", "clio v", "clio5",
-                   "clio 2", "clio ii", "clio2", "clio rs", "accident",
-                   "moteur hs", "boite hs", "épave", "non roulant",
-                   "pour pièces", "fuite huile", "moteur cassé"]
+                   "clio rs", "accident", "moteur hs", "boite hs", "épave",
+                   "non roulant", "pour pièces", "fuite huile", "moteur cassé"]
     price_min: null
     price_max: 3000
     year_min: null
     year_max: null
     mileage_max: 260000
-    require_price: true      # rejeter si prix absent
-    require_mileage: true    # rejeter si km absent
+    require_price: false
+    require_mileage: false
     market_price_ref: 2500   # cote moyenne Clio 3
 
   - name: "Peugeot 207"
     keywords_must: ["207"]
     keywords_nice: ["hdi", "sw", "break", "entretien", "révision", "distribution faite", "courroie", "1.4", "1.6"]
-    keywords_bad: ["peugeot 206", "peugeot 208", "208", "206",
+    keywords_bad: ["peugeot 206", "peugeot 208",
                    "rétroviseur", "rétro 207", "phare 207", "pare-choc 207",
                    "accident", "moteur hs", "boite hs", "épave",
                    "non roulant", "pour pièces", "fuite huile"]
@@ -30,8 +29,8 @@ searches:
     year_min: null
     year_max: null
     mileage_max: 260000
-    require_price: true
-    require_mileage: true
+    require_price: false
+    require_mileage: false
     market_price_ref: 2500   # cote moyenne 207
 
 # Scoring — garde le système prix affiché vs cote

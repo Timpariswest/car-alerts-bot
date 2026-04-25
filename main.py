@@ -80,6 +80,8 @@ def main() -> int:
         return 2
 
     print(f"[main] {len(all_listings)} annonces brutes récupérées")
+    for l in all_listings[:5]:
+        print(f"  [debug] {l.site} | {l.title[:60]} | prix={l.price} | km={l.mileage} | url={l.url[:60]}")
 
     # Dédup par uid
     dedup: dict[str, Listing] = {}
@@ -92,20 +94,28 @@ def main() -> int:
     state = State(str(STATE_PATH))
     notifier = TelegramNotifier() if not args.dry_run else None
 
+    matched_count = 0
+    filtered_count = 0
     candidates: list[Listing] = []
     for l in all_listings:
         s = match_listing_to_search(l, searches)
         if not s:
             continue
+        matched_count += 1
         ok, reason = listing_passes_hard_filters(l, s)
         if not ok:
-            print(f"  [skip:{l.site}:{l.listing_id}] {reason}")
+            print(f"  [skip:{l.site}:{l.listing_id}] {reason} | '{l.title[:50]}'")
+            filtered_count += 1
             continue
         score, breakdown = score_listing(l, s, scoring_cfg)
         l.score = score
         l.score_breakdown = breakdown
         l.matched_search = s.name
         candidates.append(l)
+
+    print(f"[main] {matched_count} annonces matchées, {filtered_count} rejetées par filtres durs, {len(candidates)} candidates")
+    for c in candidates[:5]:
+        print(f"  [candidate] {c.site} | {c.title[:50]} | prix={c.price} | km={c.mileage} | score={c.score:+.1f}")
 
     # Tri par score décroissant
     candidates.sort(key=lambda x: x.score, reverse=True)
