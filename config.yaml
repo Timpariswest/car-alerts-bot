@@ -24,7 +24,7 @@ searches:
     year_min: null
     year_max: null
     mileage_max: 260000
-    market_price_ref: 2000
+    market_price_ref: 3000
 
   - name: "Peugeot 207"
     keywords_must: ["207"]
@@ -35,7 +35,7 @@ searches:
     year_min: null
     year_max: null
     mileage_max: 260000
-    market_price_ref: 2000
+    market_price_ref: 3000
 
 # Scoring — poids de chaque facteur pour détecter les bonnes affaires
 scoring:
@@ -50,7 +50,7 @@ scoring:
   km_under_normal_bonus: 3
   km_over_normal_penalty: 2
   # Seuil minimum pour pousser sur Telegram (en dessous : on ignore)
-  min_score_to_notify: 2
+  min_score_to_notify: -10
 
 # Limites de sécurité
 max_notifications_per_run: 10
