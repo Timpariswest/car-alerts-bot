@@ -33,10 +33,14 @@ jobs:
 
       - name: Run bot
         env:
-        
           # Telegram
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Bright Data proxy résidentiel (bypass Cloudflare LBC + LaCentrale)
+          BRD_HOST: ${{ secrets.BRD_HOST }}
+          BRD_PORT: ${{ secrets.BRD_PORT }}
+          BRD_USER: ${{ secrets.BRD_USER }}
+          BRD_PASS: ${{ secrets.BRD_PASS }}
         run: |
           MODE="${{ github.event.inputs.mode }}"
           if [ "$MODE" = "seed" ]; then

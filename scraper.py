@@ -15,13 +15,30 @@ from typing import List, Optional
 import requests
 from bs4 import BeautifulSoup
 
+import os
+
 try:
     from curl_cffi import requests as cf_requests
     HAS_CURL_CFFI = True
-    print("[scraper] curl_cffi disponible — contournement Cloudflare activé")
+    print("[scraper] curl_cffi disponible")
 except ImportError:
     HAS_CURL_CFFI = False
     print("[scraper] curl_cffi non disponible — fallback requests standard")
+
+# Bright Data proxy résidentiel (env vars injectées par GitHub Actions secrets)
+_BRD_HOST = os.getenv("BRD_HOST", "")
+_BRD_PORT = os.getenv("BRD_PORT", "22225")
+_BRD_USER = os.getenv("BRD_USER", "")
+_BRD_PASS = os.getenv("BRD_PASS", "")
+HAS_PROXY = bool(_BRD_HOST and _BRD_USER and _BRD_PASS)
+
+if HAS_PROXY:
+    _PROXY_URL = f"http://{_BRD_USER}:{_BRD_PASS}@{_BRD_HOST}:{_BRD_PORT}"
+    _PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL}
+    print(f"[scraper] Proxy Bright Data configuré ({_BRD_HOST}:{_BRD_PORT})")
+else:
+    _PROXIES = {}
+    print("[scraper] Pas de proxy configuré")
 
 from models import Listing
 from parsers.common import extract_price, extract_year, extract_mileage, clean_text
@@ -53,8 +70,18 @@ HEADERS_HTML = {
 def _make_cf_session():
     """Retourne une session curl_cffi (Chrome impers.) ou requests standard."""
     if HAS_CURL_CFFI:
-        s = cf_requests.Session(impersonate="chrome124")
+        s = cf_requests.Session(impersonate="chrome124", proxies=_PROXIES if HAS_PROXY else {})
         return s, True
+    s = requests.Session()
+    if HAS_PROXY:
+        s.proxies.update(_PROXIES)
+    return s, False
+
+
+def _make_direct_session():
+    """Session sans proxy pour AS24 (pas bloqué)."""
+    if HAS_CURL_CFFI:
+        return cf_requests.Session(impersonate="chrome124"), True
     return requests.Session(), False
 
 
@@ -641,21 +668,28 @@ SITE_PARSERS = {
 }
 
 HTML_SOURCES = [
-    # AutoScout24 — seule source qui répond (LBC/LaCentrale bloqués par CF, ParuVendu mort)
-    {"site": "autoscout24", "label": "AS24 Clio",
+    # AutoScout24 — sans proxy (pas bloqué)
+    {"site": "autoscout24", "label": "AS24 Clio", "proxy": False,
      "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
-    {"site": "autoscout24", "label": "AS24 207",
+    {"site": "autoscout24", "label": "AS24 207", "proxy": False,
      "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
-    # Argus (bloqué CF pour l'instant, gardé pour future tentative)
-    # {"site": "argus", ...},
+    # LaCentrale — proxy Bright Data requis
+    {"site": "lacentrale", "label": "LaCentrale Clio 3", "proxy": True,
+     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO+3&mileageMax=260000&priceMax=3000"},
+    {"site": "lacentrale", "label": "LaCentrale 207", "proxy": True,
+     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000&priceMax=3000"},
 ]
 
 
-def _fetch_html_source(session, is_cf: bool, entry: dict) -> List[Listing]:
+def _fetch_html_source(proxy_session, proxy_is_cf: bool, direct_session, direct_is_cf: bool, entry: dict) -> List[Listing]:
     site = entry["site"]
     url = entry["url"]
     label = entry.get("label", url)
     parser = SITE_PARSERS[site]
+    use_proxy = entry.get("proxy", False) and HAS_PROXY
+
+    session = proxy_session if use_proxy else direct_session
+    is_cf = proxy_is_cf if use_proxy else direct_is_cf
 
     r = _cf_get(session, url, is_cf=is_cf)
     if r:
@@ -669,16 +703,28 @@ def _fetch_html_source(session, is_cf: bool, entry: dict) -> List[Listing]:
 # Point d'entrée public
 # ---------------------------------------------------------------------------
 def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
-    session, is_cf = _make_cf_session()
+    proxy_session, proxy_is_cf = _make_cf_session()    # avec proxy Bright Data
+    direct_session, direct_is_cf = _make_direct_session()  # sans proxy (AS24)
     all_listings: List[Listing] = []
 
-    # LBC désactivé : bloqué Cloudflare Enterprise depuis GitHub Actions IPs (403 même curl_cffi)
-    # 1. Sources HTML
+    # 1. LeBonCoin via proxy Bright Data
+    if HAS_PROXY:
+        print("[scraper] LeBonCoin (proxy Bright Data)...")
+        try:
+            lbc = _fetch_lbc(proxy_session, proxy_is_cf)
+            all_listings.extend(lbc)
+        except Exception as e:
+            print(f"[scraper] LBC erreur: {e}")
+            traceback.print_exc()
+    else:
+        print("[scraper] LBC ignoré (pas de proxy configuré)")
+
+    # 2. Sources HTML
     src_list = sources or HTML_SOURCES
     print(f"[scraper] Sources HTML ({len(src_list)})...")
     for entry in src_list:
         try:
-            lst = _fetch_html_source(session, is_cf, entry)
+            lst = _fetch_html_source(proxy_session, proxy_is_cf, direct_session, direct_is_cf, entry)
             all_listings.extend(lst)
         except Exception as e:
             print(f"  [{entry.get('label')}] Exception: {e}")
