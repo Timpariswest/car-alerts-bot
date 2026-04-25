@@ -650,11 +650,6 @@ HTML_SOURCES = [
      "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO+3&mileageMax=260000&priceMax=3000"},
     {"site": "lacentrale", "label": "LaCentrale 207",
      "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000&priceMax=3000"},
-    # OuestFrance-Auto (pas de Cloudflare)
-    {"site": "ouestfrance", "label": "OFA Clio",
-     "url": "https://www.ouestfrance-auto.com/annonces/voitures/renault/clio/?tri=date_desc&prix_max=3000&km_max=260000"},
-    {"site": "ouestfrance", "label": "OFA 207",
-     "url": "https://www.ouestfrance-auto.com/annonces/voitures/peugeot/207/?tri=date_desc&prix_max=3000&km_max=260000"},
     # Argus
     {"site": "argus", "label": "Argus Clio 3",
      "url": "https://www.largus.fr/voitures-occasions.php?brand=Renault&model=Clio+3&pricemax=3000&kmmax=260000"},
