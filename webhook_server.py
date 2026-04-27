@@ -93,6 +93,22 @@ def update_github_state(state_data: dict, sha: str) -> bool:
 
 # ─── Keyboard helpers ────────────────────────────────────────────────────────
 
+def build_keyboard_original(uid_key: str) -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "⭐", "callback_data": f"r1_{uid_key}"},
+                {"text": "👍", "callback_data": f"r2_{uid_key}"},
+                {"text": "👎", "callback_data": f"r3_{uid_key}"},
+            ],
+            [
+                {"text": "📋 Description", "callback_data": f"d_{uid_key}"},
+                {"text": "📊 Mon bilan", "callback_data": "bilan"},
+            ],
+        ]
+    }
+
+
 def build_keyboard_after_rating(uid_key: str, rating: int) -> dict:
     return {
         "inline_keyboard": [
@@ -151,18 +167,24 @@ def webhook():
             rating = int(data[1])
             uid_key = data[3:]
 
-            # Répond immédiatement → arrête le chargement
-            answer_callback(cq_id, f"Classé : {RATING_LABELS[rating]}")
-            # Met à jour le clavier tout de suite
-            edit_keyboard(cq_chat_id, cq_msg_id, build_keyboard_after_rating(uid_key, rating))
-
-            # Stocke le rating dans le repo GitHub
             state_data, sha = get_github_state()
-            if sha:
-                uid = find_uid_by_key(state_data.get("msg_ids", {}), uid_key)
-                if uid:
-                    meta = state_data.get("msg_ids", {}).get(uid, {})
-                    state_data.setdefault("ratings", {})[uid] = {
+            uid = find_uid_by_key(state_data.get("msg_ids", {}), uid_key)
+            current_rating = state_data.get("ratings", {}).get(uid, {}).get("rating") if uid else None
+
+            if uid and current_rating == rating:
+                # Même bouton → annule le classement
+                answer_callback(cq_id, "Classement annulé")
+                edit_keyboard(cq_chat_id, cq_msg_id, build_keyboard_original(uid_key))
+                if sha:
+                    state_data.get("ratings", {}).pop(uid, None)
+                    update_github_state(state_data, sha)
+            else:
+                # Nouveau classement ou changement
+                answer_callback(cq_id, f"Classé : {RATING_LABELS[rating]}")
+                edit_keyboard(cq_chat_id, cq_msg_id, build_keyboard_after_rating(uid_key, rating))
+                if sha:
+                    meta = state_data.get("msg_ids", {}).get(uid, {}) if uid else {}
+                    state_data.setdefault("ratings", {})[uid or uid_key] = {
                         "rating": rating,
                         "title": meta.get("title", ""),
                         "price": meta.get("price"),
@@ -174,15 +196,27 @@ def webhook():
         elif data.startswith("d_"):
             uid_key = data[2:]
             state_data, _ = get_github_state()
+            # Cherche l'uid dans msg_ids puis descriptions
             uid = find_uid_by_key(state_data.get("msg_ids", {}), uid_key)
             if uid is None:
                 uid = find_uid_by_key(state_data.get("descriptions", {}), uid_key)
             desc = state_data.get("descriptions", {}).get(uid) if uid else None
             if desc:
                 answer_callback(cq_id)
-                send_message(cq_chat_id, f"📋 <b>Description :</b>\n\n{desc[:3000]}")
+                # Spoiler = texte caché, tap pour révéler (pas de place perdue si tu veux pas lire)
+                send_message(cq_chat_id,
+                             f"📋 <b>Description</b> (appuie pour lire) :\n<tg-spoiler>{desc[:3000]}</tg-spoiler>")
+            elif uid:
+                meta = state_data.get("msg_ids", {}).get(uid, {})
+                title = meta.get("title", "?")
+                url = meta.get("url", "")
+                answer_callback(cq_id)
+                send_message(cq_chat_id,
+                             f"📋 Pas de description pour cette annonce.\n"
+                             f"<b>{title}</b>\n"
+                             f'<a href="{url}">Voir l\'annonce directement</a>')
             else:
-                answer_callback(cq_id, "Pas de description disponible.", alert=True)
+                answer_callback(cq_id, "Annonce introuvable dans l'historique.", alert=True)
 
         # Bilan
         elif data == "bilan":
