@@ -27,6 +27,7 @@ from models import Listing, ScoringConfig, SearchConfig
 from notifier import TelegramNotifier
 from scoring import listing_passes_hard_filters, score_listing
 from state import State
+from callback_handler import process_callbacks
 
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
@@ -70,6 +71,12 @@ def main() -> int:
 
     print(f"[main] dry_run={args.dry_run} seed={args.seed} max_notifs={max_notifs}")
     print(f"[main] {len(searches)} recherches configurées")
+
+    # 0. Traitement des callbacks Telegram (boutons cliqués depuis le dernier run)
+    state_early = State(str(STATE_PATH))
+    if not args.dry_run and not args.seed:
+        process_callbacks(state_early)
+        state_early.save()
 
     # 1. Scraping direct des sites
     try:
@@ -142,7 +149,7 @@ def main() -> int:
             print(f"[main] max_notifs atteint ({max_notifs}), stop.")
             break
 
-        ok = notifier.send(l) if notifier else False
+        ok = notifier.send(l, state) if notifier else False
         if ok:
             state.mark_seen(l.uid)
             sent += 1
