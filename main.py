@@ -58,33 +58,62 @@ def match_listing_to_search(listing: Listing, searches: list[SearchConfig]) -> S
     return None
 
 
+def _send_telegram_error(msg: str) -> None:
+    """Envoie une alerte Telegram si les vars d'env sont disponibles. Jamais de crash."""
+    import os, requests as _req
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return
+    try:
+        _req.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": f"🚨 Bot erreur critique :\n{msg[:1000]}", "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="Pas d'envoi, pas de save state.")
     ap.add_argument("--seed", action="store_true", help="Marque tout comme vu sans envoyer.")
     args = ap.parse_args()
 
-    cfg = load_config()
-    searches = build_searches(cfg)
-    scoring_cfg = build_scoring(cfg)
+    try:
+        cfg = load_config()
+        searches = build_searches(cfg)
+        scoring_cfg = build_scoring(cfg)
+    except Exception as e:
+        # Erreur config = bug réel → on alerte et on échoue pour voir le mail
+        msg = f"Impossible de charger la config : {e}"
+        print(f"[main] CRITIQUE: {msg}")
+        _send_telegram_error(msg)
+        return 1
+
     max_notifs = int(cfg.get("max_notifications_per_run", 10))
 
     print(f"[main] dry_run={args.dry_run} seed={args.seed} max_notifs={max_notifs}")
     print(f"[main] {len(searches)} recherches configurées")
 
-    # 0. Traitement des callbacks Telegram (boutons cliqués depuis le dernier run)
+    # 0. Traitement des callbacks Telegram (non-bloquant — échec ignoré silencieusement)
     state_early = State(str(STATE_PATH))
     if not args.dry_run and not args.seed:
-        process_callbacks(state_early)
-        state_early.save()
+        try:
+            process_callbacks(state_early)
+            state_early.save()
+        except Exception as e:
+            print(f"[main] Callbacks ignorés (erreur non-bloquante) : {e}")
 
     # 1. Scraping direct des sites
     try:
         all_listings = fetch_listings()
     except Exception as e:
-        print(f"[main] Erreur scraping : {e}")
+        # Erreur scraping = transitoire (CloudFlare, site down…) → pas de mail GitHub
+        print(f"[main] Scraping échoué (transitoire) : {e}")
         traceback.print_exc()
-        return 2
+        return 0  # ← exit 0 : workflow vert, pas de mail
 
     print(f"[main] {len(all_listings)} annonces brutes récupérées")
     for l in all_listings[:5]:
@@ -166,4 +195,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as e:
+        # Filet ultime — aucun bug inattendu ne doit faire échouer le workflow
+        msg = traceback.format_exc()
+        print(f"[main] Exception non gérée :\n{msg}")
+        _send_telegram_error(msg)
+        sys.exit(0)  # ← toujours vert côté GitHub Actions
