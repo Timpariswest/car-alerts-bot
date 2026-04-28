@@ -9,7 +9,7 @@ searches:
       "entretien", "révision", "distribution faite", "courroie faite",
       # Travaux à faire = voiture bradée → opportunité de marge
       "distribution à faire", "courroie à refaire", "courroie à faire",
-      "embrayage", "injecteur", "joint de culasse", "fuite huile",
+      "embrayage", "injecteur", "fuite huile",
       # Signaux vendeur pressé = prix bradé
       "urgent", "cause déménagement", "cause départ", "à saisir",
       "vend rapidement", "prix à débattre", "négociable"
@@ -22,6 +22,8 @@ searches:
       # Perte totale (irréparable ou sans valeur)
       "épave", "non roulant", "pour pièces", "moteur hs", "boite hs", "moteur cassé",
       "accidenté", "accident grave",
+      # Réparation trop lourde
+      "joint de culasse",
       # ❌ Problèmes administratifs — dealbreaker absolu
       "carte grise non au nom", "cg non au nom", "sans carte grise",
       "duplicata", "en cours d'immatriculation", "gage", "opposition",
@@ -46,7 +48,7 @@ searches:
       "1.4", "1.6",
       # Travaux à faire = opportunité
       "distribution à faire", "courroie à refaire", "courroie à faire",
-      "embrayage", "injecteur", "joint de culasse", "fuite huile",
+      "embrayage", "injecteur", "fuite huile",
       # Signaux vendeur pressé
       "urgent", "cause déménagement", "cause départ", "à saisir",
       "vend rapidement", "prix à débattre", "négociable"
@@ -59,6 +61,8 @@ searches:
       # Perte totale
       "épave", "non roulant", "pour pièces", "moteur hs", "boite hs",
       "accidenté", "accident grave",
+      # Réparation trop lourde
+      "joint de culasse",
       # ❌ Problèmes administratifs — dealbreaker absolu
       "carte grise non au nom", "cg non au nom", "sans carte grise",
       "duplicata", "en cours d'immatriculation", "gage", "opposition",
