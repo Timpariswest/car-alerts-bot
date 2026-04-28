@@ -1,35 +1,76 @@
 searches:
   - name: "Renault Clio III"
-    # Doit contenir "clio" dans le titre
     keywords_must: ["clio"]
-    # Bonus si ces mots apparaissent
-    keywords_nice: ["dynamique", "expression", "tce", "1.2", "1.5", "dci", "entretien", "révision", "distribution", "courroie"]
-    # Rejeter si ces mots apparaissent (mauvais modèle ou mauvais état)
-    keywords_bad: ["clio 4", "clio iv", "clio4", "clio 5", "clio v", "clio5",
-                   "clio rs", "accident", "moteur hs", "boite hs", "épave",
-                   "non roulant", "pour pièces", "fuite huile", "moteur cassé"]
+
+    # Bonus de score : bon état confirmé OU travaux = voiture sous-cotée (opportunité)
+    keywords_nice: [
+      # État positif confirmé
+      "dynamique", "expression", "tce", "1.2", "1.5", "dci",
+      "entretien", "révision", "distribution faite", "courroie faite",
+      # Travaux à faire = voiture bradée → opportunité de marge
+      "distribution à faire", "courroie à refaire", "courroie à faire",
+      "embrayage", "injecteur", "joint de culasse", "fuite huile",
+      # Signaux vendeur pressé = prix bradé
+      "urgent", "cause déménagement", "cause départ", "à saisir",
+      "vend rapidement", "prix à débattre", "négociable"
+    ]
+
+    # Rejet automatique : épaves/pièces + problèmes administratifs (dealbreakers)
+    keywords_bad: [
+      # Mauvais modèle
+      "clio 4", "clio iv", "clio4", "clio 5", "clio v", "clio5", "clio rs",
+      # Perte totale (irréparable ou sans valeur)
+      "épave", "non roulant", "pour pièces", "moteur hs", "boite hs", "moteur cassé",
+      "accidenté", "accident grave",
+      # ❌ Problèmes administratifs — dealbreaker absolu
+      "carte grise non au nom", "cg non au nom", "sans carte grise",
+      "duplicata", "en cours d'immatriculation", "gage", "opposition",
+      "papiers non disponibles", "titre de circulation"
+    ]
+
     price_min: null
     price_max: 3000
     year_min: null
     year_max: null
     mileage_max: 260000
-    require_price: true        # ignorer les annonces sans prix affiché
+    require_price: true
     require_mileage: false
     market_price_ref: 2500   # cote moyenne Clio 3
 
   - name: "Peugeot 207"
     keywords_must: ["207"]
-    keywords_nice: ["hdi", "sw", "break", "entretien", "révision", "distribution faite", "courroie", "1.4", "1.6"]
-    keywords_bad: ["peugeot 206", "peugeot 208",
-                   "rétroviseur", "rétro 207", "phare 207", "pare-choc 207",
-                   "accident", "moteur hs", "boite hs", "épave",
-                   "non roulant", "pour pièces", "fuite huile"]
+
+    keywords_nice: [
+      # État positif confirmé
+      "hdi", "sw", "break", "entretien", "révision", "distribution faite", "courroie faite",
+      "1.4", "1.6",
+      # Travaux à faire = opportunité
+      "distribution à faire", "courroie à refaire", "courroie à faire",
+      "embrayage", "injecteur", "joint de culasse", "fuite huile",
+      # Signaux vendeur pressé
+      "urgent", "cause déménagement", "cause départ", "à saisir",
+      "vend rapidement", "prix à débattre", "négociable"
+    ]
+
+    keywords_bad: [
+      # Mauvais modèle ou pièces détachées
+      "peugeot 206", "peugeot 208",
+      "rétroviseur", "rétro 207", "phare 207", "pare-choc 207",
+      # Perte totale
+      "épave", "non roulant", "pour pièces", "moteur hs", "boite hs",
+      "accidenté", "accident grave",
+      # ❌ Problèmes administratifs — dealbreaker absolu
+      "carte grise non au nom", "cg non au nom", "sans carte grise",
+      "duplicata", "en cours d'immatriculation", "gage", "opposition",
+      "papiers non disponibles", "titre de circulation"
+    ]
+
     price_min: null
     price_max: 3000
     year_min: null
     year_max: null
     mileage_max: 260000
-    require_price: true        # ignorer les annonces sans prix affiché
+    require_price: true
     require_mileage: false
     market_price_ref: 2500   # cote moyenne 207
 
@@ -39,7 +80,7 @@ searches:
 scoring:
   price_vs_market_weight: 40
   nice_keyword_bonus: 2
-  nice_keyword_cap: 6
+  nice_keyword_cap: 10   # plafond relevé car plus de mots-clés positifs
   bad_keyword_penalty: 5
   km_under_normal_bonus: 3
   km_over_normal_penalty: 2
