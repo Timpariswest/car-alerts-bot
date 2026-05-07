@@ -2,7 +2,7 @@ name: Car Alerts Bot
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # toutes les 2 heures
+    - cron: "0 */3 * * *"   # toutes les 3 heures
   workflow_dispatch:
     inputs:
       mode:
