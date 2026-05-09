@@ -444,12 +444,34 @@ def _parse_lacentrale(html: str, source_url: str) -> List[Listing]:
     data = _extract_next_data(html)
     if data:
         page_props = _safe_get(data, "props", "pageProps") or {}
+        # Debug : affiche les clés disponibles pour diagnostiquer les changements de structure
+        print(f"    [LaCentrale] __NEXT_DATA__ pageProps clés={list(page_props.keys())[:15]}")
+        # Tente dehydratedState (React Query / TanStack Query)
+        dehydrated = page_props.get("dehydratedState") or {}
+        queries = dehydrated.get("queries") or []
+        dehydrated_ads = []
+        for q in queries:
+            qdata = _safe_get(q, "state", "data") or {}
+            for key in ("classifiedAds", "vehicles", "listings", "ads", "results"):
+                if isinstance(qdata.get(key), list) and qdata[key]:
+                    dehydrated_ads = qdata[key]
+                    print(f"    [LaCentrale] dehydratedState → clé='{key}' {len(dehydrated_ads)} annonces")
+                    break
+            if dehydrated_ads:
+                break
         vehicles = (
-            page_props.get("vehicles") or page_props.get("listings")
+            dehydrated_ads
+            or page_props.get("classifiedAds")
+            or page_props.get("vehicles") or page_props.get("listings")
+            or _safe_get(page_props, "searchResult", "classifiedAds")
             or _safe_get(page_props, "searchResult", "vehicles")
             or _safe_get(page_props, "searchResult", "listings")
+            or _safe_get(page_props, "initialData", "classifiedAds")
+            or _safe_get(page_props, "initialData", "vehicles")
             or page_props.get("ads") or []
         )
+        if not vehicles:
+            print(f"    [LaCentrale] 0 annonces dans __NEXT_DATA__ — structure inconnue, clés={list(page_props.keys())}")
         for v in vehicles:
             try:
                 listing_id = str(v.get("id") or v.get("listingId") or v.get("adId") or "")
@@ -492,13 +514,31 @@ def _parse_lacentrale(html: str, source_url: str) -> List[Listing]:
 def _parse_lacentrale_html(html: str) -> List[Listing]:
     listings = []
     soup = BeautifulSoup(html, "lxml")
-    id_pat = re.compile(r"auto-occasion-annonce-([A-Z0-9]+)\.html", re.IGNORECASE)
+    # Plusieurs patterns d'URL LaCentrale (ils changent parfois)
+    id_patterns = [
+        re.compile(r"auto-occasion-annonce-([A-Z0-9]+)\.html", re.IGNORECASE),
+        re.compile(r"lacentrale\.fr/(?:listing|annonce)/([A-Z0-9\-]+)", re.IGNORECASE),
+        re.compile(r"/(?:listing|annonce)/([A-Z0-9]{8,})", re.IGNORECASE),
+    ]
     seen = set()
+    # Log pour diagnostic
+    all_hrefs = [a["href"] for a in soup.find_all("a", href=True) if "lacentrale" in a["href"].lower() or "/listing/" in a["href"].lower() or "annonce" in a["href"].lower()]
+    if all_hrefs:
+        print(f"    [LaCentrale HTML] exemples d'URLs trouvées : {all_hrefs[:3]}")
+    else:
+        # Compter les liens et la taille HTML pour diagnostic
+        total_links = len(soup.find_all("a", href=True))
+        print(f"    [LaCentrale HTML] Aucun lien lacentrale trouvé. Total liens={total_links}, HTML={len(html)} chars")
     for a in soup.find_all("a", href=True):
-        m = id_pat.search(a["href"])
-        if not m or m.group(1) in seen:
+        listing_id = None
+        for pat in id_patterns:
+            m = pat.search(a["href"])
+            if m:
+                listing_id = m.group(1)
+                break
+        if not listing_id or listing_id in seen:
             continue
-        seen.add(m.group(1))
+        seen.add(listing_id)
         block = a
         for _ in range(5):
             p = block.parent
@@ -508,11 +548,13 @@ def _parse_lacentrale_html(html: str) -> List[Listing]:
             block = p
         bt = clean_text(block.get_text(" ", strip=True))
         listings.append(Listing(
-            site="lacentrale", listing_id=m.group(1),
+            site="lacentrale", listing_id=listing_id,
             title=clean_text(a.get_text(" ", strip=True))[:200] or "LaCentrale",
             price=extract_price(bt), year=extract_year(bt), mileage=extract_mileage(bt),
-            location=None, url=f"https://www.lacentrale.fr/auto-occasion-annonce-{m.group(1)}.html",
+            location=None, url=f"https://www.lacentrale.fr/auto-occasion-annonce-{listing_id}.html",
         ))
+    if listings:
+        print(f"    [LaCentrale HTML fallback] {len(listings)} annonces trouvées")
     return listings
 
 
@@ -694,9 +736,11 @@ def _fetch_html_source(proxy_session, proxy_is_cf: bool, direct_session, direct_
 
     r = _cf_get(session, url, is_cf=is_cf, verify=verify)
     if r:
+        print(f"  [{label}] HTTP {r.status_code}, HTML={len(r.text)} chars, proxy={'oui' if use_proxy else 'non'}")
         listings = parser(r.text, url)
-        print(f"  [{label}] {len(listings)} annonces")
+        print(f"  [{label}] {len(listings)} annonces parsées")
         return listings
+    print(f"  [{label}] ÉCHEC requête (pas de réponse), proxy={'oui' if use_proxy else 'non'}")
     return []
 
 
