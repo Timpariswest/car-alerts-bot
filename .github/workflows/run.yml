@@ -31,6 +31,34 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Vérification proxy Bright Data
+        env:
+          BRD_HOST: ${{ secrets.BRD_HOST }}
+          BRD_PORT: ${{ secrets.BRD_PORT }}
+          BRD_USER: ${{ secrets.BRD_USER }}
+          BRD_PASS: ${{ secrets.BRD_PASS }}
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+          host = os.getenv("BRD_HOST","")
+          port = os.getenv("BRD_PORT","22225")
+          user = os.getenv("BRD_USER","")
+          pwd  = os.getenv("BRD_PASS","")
+          if not (host and user and pwd):
+              print("⚠️  Secrets BRD_HOST/BRD_USER/BRD_PASS non configurés — proxy désactivé")
+              sys.exit(0)
+          proxy_url = f"http://{user}:{pwd}@{host}:{port}"
+          print(f"Proxy configuré : {host}:{port} (user={user[:6]}...)")
+          try:
+              from curl_cffi import requests as cf
+              s = cf.Session(impersonate="chrome124", proxies={"http": proxy_url, "https": proxy_url})
+              r = s.get("https://httpbin.org/ip", timeout=20, verify=False)
+              print(f"✅ Proxy OK — IP sortante : {r.json().get('origin','?')}")
+          except Exception as e:
+              print(f"❌ Proxy KO : {e}")
+              print("→ Vérifie ton abonnement Bright Data et les secrets GitHub")
+          EOF
+
       - name: Run bot
         env:
           # Telegram
