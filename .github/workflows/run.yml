@@ -2,7 +2,8 @@ name: Car Alerts Bot
 
 on:
   schedule:
-    - cron: "0 */3 * * *"   # toutes les 3 heures
+    - cron: "0 * * * *"              # toutes les heures à :00 (24 runs/jour)
+    - cron: "30 2,6,10,14,18 * * *"  # 5 fois/jour à :30 → total 29 runs/jour = ~1798 min/mois
   workflow_dispatch:
     inputs:
       mode:
