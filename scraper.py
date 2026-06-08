@@ -16,6 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 
 import os
+from urllib.parse import quote as _url_quote
 
 try:
     from curl_cffi import requests as cf_requests
@@ -33,9 +34,12 @@ _BRD_PASS = os.getenv("BRD_PASS", "")
 HAS_PROXY = bool(_BRD_HOST and _BRD_USER and _BRD_PASS)
 
 if HAS_PROXY:
-    _PROXY_URL = f"http://{_BRD_USER}:{_BRD_PASS}@{_BRD_HOST}:{_BRD_PORT}"
+    # URL-encode user/pass pour éviter que les caractères spéciaux (@ / + =) cassent l'URL
+    _user_enc = _url_quote(_BRD_USER, safe="")
+    _pass_enc = _url_quote(_BRD_PASS, safe="")
+    _PROXY_URL = f"http://{_user_enc}:{_pass_enc}@{_BRD_HOST}:{_BRD_PORT}"
     _PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL}
-    print(f"[scraper] Proxy Bright Data configuré ({_BRD_HOST}:{_BRD_PORT})")
+    print(f"[scraper] Proxy Bright Data configuré ({_BRD_HOST}:{_BRD_PORT}, user={_BRD_USER[:12]}...)")
 else:
     _PROXIES = {}
     print("[scraper] Pas de proxy configuré")
