@@ -16,7 +16,11 @@ import requests
 from bs4 import BeautifulSoup
 
 import os
+import urllib3
 from urllib.parse import quote as _url_quote
+
+# Supprime les avertissements SSL liés au proxy Bright Data (verify=False intentionnel)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     from curl_cffi import requests as cf_requests
