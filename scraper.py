@@ -72,13 +72,19 @@ HEADERS_HTML = {
 # Session CF (curl_cffi ou fallback requests)
 # ---------------------------------------------------------------------------
 def _make_cf_session():
-    """Retourne une session curl_cffi (Chrome impers.) ou requests standard."""
-    if HAS_CURL_CFFI:
-        s = cf_requests.Session(impersonate="chrome124", proxies=_PROXIES if HAS_PROXY else {})
-        return s, True
+    """
+    Retourne une session pour les requêtes avec proxy.
+    curl_cffi avec Chrome impersonation ne gère pas bien le CONNECT tunnel Bright Data
+    → on utilise requests standard pour les sessions proxy.
+    """
     s = requests.Session()
     if HAS_PROXY:
         s.proxies.update(_PROXIES)
+        s.verify = False  # Bright Data fait interception SSL
+    if HAS_CURL_CFFI and not HAS_PROXY:
+        # Sans proxy, curl_cffi est utile pour bypass Cloudflare
+        cf_s = cf_requests.Session(impersonate="chrome124")
+        return cf_s, True
     return s, False
 
 
