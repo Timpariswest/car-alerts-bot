@@ -127,6 +127,7 @@ def _cf_post(session, url: str, json_payload: dict, headers: dict, *, is_cf: boo
         if is_cf:
             r = session.post(url, json=json_payload, headers=headers, timeout=timeout, verify=verify)
         else:
+            # requests : ne pas passer verify en arg, utiliser la config de la session
             r = session.post(url, json=json_payload, headers=headers, timeout=timeout)
         return r
     except Exception as e:
@@ -258,7 +259,7 @@ def _fetch_lbc(proxy_session=None, proxy_is_cf: bool = False, direct_session=Non
         for sess, is_cf, verify, sess_label in sessions_to_try:
             for api_key in API_KEYS:
                 r = _cf_post(sess, url_api, payload, _make_headers(api_key), is_cf=is_cf, verify=verify)
-                if r and r.status_code == 200:
+                if r is not None and r.status_code == 200:
                     try:
                         data = r.json()
                         lst = _parse_lbc_json(data)
@@ -269,10 +270,10 @@ def _fetch_lbc(proxy_session=None, proxy_is_cf: bool = False, direct_session=Non
                         break
                     except Exception as e:
                         print(f"  [LBC API '{text}' via {sess_label}] parse error: {e}")
-                elif r:
+                elif r is not None:
                     print(f"  [LBC API '{text}' via {sess_label}] HTTP {r.status_code} (clé={api_key[:8]}...)")
                 else:
-                    print(f"  [LBC API '{text}' via {sess_label}] Pas de réponse")
+                    print(f"  [LBC API '{text}' via {sess_label}] Pas de réponse (exception)")
             if success:
                 break
             time.sleep(1)
