@@ -30,22 +30,36 @@ except ImportError:
     HAS_CURL_CFFI = False
     print("[scraper] curl_cffi non disponible — fallback requests standard")
 
-# Bright Data proxy résidentiel (env vars injectées par GitHub Actions secrets)
-_BRD_HOST = os.getenv("BRD_HOST", "")
-_BRD_PORT = os.getenv("BRD_PORT", "22225")
-_BRD_USER = os.getenv("BRD_USER", "")
-_BRD_PASS = os.getenv("BRD_PASS", "")
+# Bright Data proxy (env vars injectées par GitHub Actions secrets)
+_BRD_HOST       = os.getenv("BRD_HOST", "")
+_BRD_PORT       = os.getenv("BRD_PORT", "22225")
+_BRD_SOCKS5_PORT = os.getenv("BRD_SOCKS5_PORT", "")   # ex: 22228 (résidentiel) ou 33338 (ISP)
+_BRD_USER       = os.getenv("BRD_USER", "")
+_BRD_PASS       = os.getenv("BRD_PASS", "")
 HAS_PROXY = bool(_BRD_HOST and _BRD_USER and _BRD_PASS)
 
 if HAS_PROXY:
     # URL-encode user/pass pour éviter que les caractères spéciaux (@ / + =) cassent l'URL
     _user_enc = _url_quote(_BRD_USER, safe="")
     _pass_enc = _url_quote(_BRD_PASS, safe="")
-    _PROXY_URL = f"http://{_user_enc}:{_pass_enc}@{_BRD_HOST}:{_BRD_PORT}"
-    _PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL}
-    print(f"[scraper] Proxy Bright Data configuré ({_BRD_HOST}:{_BRD_PORT}, user={_BRD_USER[:12]}...)")
+    # Proxy HTTP classique (Bright Data fait interception SSL → verify=False obligatoire)
+    _PROXY_URL    = f"http://{_user_enc}:{_pass_enc}@{_BRD_HOST}:{_BRD_PORT}"
+    _PROXIES      = {"http": _PROXY_URL, "https": _PROXY_URL}
+    # Proxy SOCKS5 (si BRD_SOCKS5_PORT défini) — compatible curl_cffi Chrome impersonation
+    # SOCKS5 ne fait PAS d'interception SSL → verify=True possible → TLS fingerprint Chrome intact
+    if _BRD_SOCKS5_PORT:
+        _SOCKS5_URL   = f"socks5h://{_user_enc}:{_pass_enc}@{_BRD_HOST}:{_BRD_SOCKS5_PORT}"
+        _SOCKS5_PROXIES = {"http": _SOCKS5_URL, "https": _SOCKS5_URL}
+        HAS_SOCKS5 = True
+        print(f"[scraper] Proxy Bright Data SOCKS5 configuré ({_BRD_HOST}:{_BRD_SOCKS5_PORT}, user={_BRD_USER[:12]}...)")
+    else:
+        _SOCKS5_PROXIES = {}
+        HAS_SOCKS5 = False
+        print(f"[scraper] Proxy Bright Data HTTP configuré ({_BRD_HOST}:{_BRD_PORT}, user={_BRD_USER[:12]}...)")
 else:
     _PROXIES = {}
+    _SOCKS5_PROXIES = {}
+    HAS_SOCKS5 = False
     print("[scraper] Pas de proxy configuré")
 
 from models import Listing
@@ -77,19 +91,32 @@ HEADERS_HTML = {
 # ---------------------------------------------------------------------------
 def _make_cf_session():
     """
-    Retourne une session pour les requêtes avec proxy.
-    curl_cffi avec Chrome impersonation ne gère pas bien le CONNECT tunnel Bright Data
-    → on utilise requests standard pour les sessions proxy.
+    Retourne (session, is_cf) pour les requêtes avec proxy.
+
+    Priorité :
+      1. SOCKS5 + curl_cffi  → Chrome TLS impersonation intact (meilleur bypass CF)
+      2. HTTP proxy + requests → Chrome impersonation impossible (CONNECT tunnel casse le TLS)
+      3. Sans proxy + curl_cffi → bypass CF sans proxy
+      4. Sans proxy + requests  → fallback minimal
     """
-    s = requests.Session()
-    if HAS_PROXY:
+    if HAS_PROXY and HAS_SOCKS5 and HAS_CURL_CFFI:
+        # ✅ MEILLEUR CAS : SOCKS5 transparent + Chrome fingerprint → bypass Cloudflare optimal
+        cf_s = cf_requests.Session(impersonate="chrome124", proxies=_SOCKS5_PROXIES)
+        print("[scraper] Session proxy : SOCKS5 + curl_cffi Chrome impersonation")
+        return cf_s, True
+    elif HAS_PROXY:
+        # HTTP proxy : interception SSL → verify=False, curl_cffi incompatible CONNECT tunnel
+        s = requests.Session()
         s.proxies.update(_PROXIES)
-        s.verify = False  # Bright Data fait interception SSL
-    if HAS_CURL_CFFI and not HAS_PROXY:
-        # Sans proxy, curl_cffi est utile pour bypass Cloudflare
+        s.verify = False
+        print("[scraper] Session proxy : HTTP + requests (SOCKS5 non configuré)")
+        return s, False
+    elif HAS_CURL_CFFI:
+        # Sans proxy
         cf_s = cf_requests.Session(impersonate="chrome124")
         return cf_s, True
-    return s, False
+    else:
+        return requests.Session(), False
 
 
 def _make_direct_session():
@@ -106,6 +133,7 @@ def _cf_get(session, url: str, *, is_cf: bool, timeout: int = 30, retries: int =
             if is_cf:
                 r = session.get(url, headers=HEADERS_HTML, timeout=timeout, verify=verify)
             else:
+                # requests : verify géré par session.verify
                 r = session.get(url, headers=HEADERS_HTML, timeout=timeout)
             print(f"    [HTTP {r.status_code}] {url[:80]}")
             if r.status_code == 200:
@@ -115,7 +143,7 @@ def _cf_get(session, url: str, *, is_cf: bool, timeout: int = 30, retries: int =
                 if attempt < retries:
                     time.sleep(5 * (attempt + 1))
         except Exception as e:
-            print(f"    [Erreur réseau] {e} (tentative {attempt+1})")
+            print(f"    [Erreur réseau] {type(e).__name__}: {e} (tentative {attempt+1})")
             if attempt < retries:
                 time.sleep(3)
     return None

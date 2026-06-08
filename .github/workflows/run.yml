@@ -34,39 +34,49 @@ jobs:
 
       - name: Vérification proxy Bright Data
         env:
-          BRD_HOST: ${{ secrets.BRD_HOST }}
-          BRD_PORT: ${{ secrets.BRD_PORT }}
-          BRD_USER: ${{ secrets.BRD_USER }}
-          BRD_PASS: ${{ secrets.BRD_PASS }}
+          BRD_HOST:        ${{ secrets.BRD_HOST }}
+          BRD_PORT:        ${{ secrets.BRD_PORT }}
+          BRD_SOCKS5_PORT: ${{ secrets.BRD_SOCKS5_PORT }}
+          BRD_USER:        ${{ secrets.BRD_USER }}
+          BRD_PASS:        ${{ secrets.BRD_PASS }}
         run: |
           python3 - <<'EOF'
           import os, sys
-          host = os.getenv("BRD_HOST","")
-          port = os.getenv("BRD_PORT","22225")
-          user = os.getenv("BRD_USER","")
-          pwd  = os.getenv("BRD_PASS","")
+          host       = os.getenv("BRD_HOST","")
+          port       = os.getenv("BRD_PORT","22225")
+          socks5port = os.getenv("BRD_SOCKS5_PORT","")
+          user       = os.getenv("BRD_USER","")
+          pwd        = os.getenv("BRD_PASS","")
           if not (host and user and pwd):
               print("⚠️  Secrets BRD_HOST/BRD_USER/BRD_PASS non configurés — proxy désactivé")
               sys.exit(0)
           from urllib.parse import quote as _q
-          proxy_url = f"http://{_q(user,safe='')}:{_q(pwd,safe='')}@{host}:{port}"
-          print(f"Proxy configuré : {host}:{port} (user={user[:12]}...)")
-          # Test 1 : requests standard (plus fiable pour proxy CONNECT)
+          u, p = _q(user,safe=''), _q(pwd,safe='')
+
+          # Test SOCKS5 + curl_cffi Chrome impersonation (optimal Cloudflare bypass)
+          if socks5port:
+              socks5_url = f"socks5h://{u}:{p}@{host}:{socks5port}"
+              print(f"Test SOCKS5 : {host}:{socks5port}")
+              try:
+                  from curl_cffi import requests as cf
+                  s = cf.Session(impersonate="chrome124", proxies={"https": socks5_url})
+                  r = s.get("https://httpbin.org/ip", timeout=20)
+                  print(f"✅ SOCKS5 + Chrome OK — IP sortante : {r.json().get('origin','?')}")
+              except Exception as e:
+                  print(f"⚠️  SOCKS5 KO : {e}")
+          else:
+              print("ℹ️  BRD_SOCKS5_PORT non défini — SOCKS5 désactivé (ajoute ce secret pour le meilleur bypass CF)")
+
+          # Test HTTP proxy + requests (fallback)
+          proxy_url = f"http://{u}:{p}@{host}:{port}"
+          print(f"Test HTTP proxy : {host}:{port}")
           try:
               import requests as req
               r = req.get("https://httpbin.org/ip", proxies={"http": proxy_url, "https": proxy_url}, timeout=20, verify=False)
-              print(f"✅ Proxy OK (requests) — IP sortante : {r.json().get('origin','?')}")
+              print(f"✅ HTTP proxy OK (requests) — IP sortante : {r.json().get('origin','?')}")
           except Exception as e1:
-              print(f"⚠️  requests KO : {e1}")
-              # Test 2 : curl_cffi sans impersonation
-              try:
-                  from curl_cffi import requests as cf
-                  s = cf.Session(proxies={"http": proxy_url, "https": proxy_url})
-                  r = s.get("https://httpbin.org/ip", timeout=20, verify=False)
-                  print(f"✅ Proxy OK (curl_cffi sans impersonation) — IP : {r.json().get('origin','?')}")
-              except Exception as e2:
-                  print(f"❌ Proxy KO : {e2}")
-                  print("→ Vérifie ton abonnement Bright Data et les secrets GitHub")
+              print(f"❌ HTTP proxy KO : {e1}")
+              print("→ Vérifie ton abonnement Bright Data et les secrets GitHub")
           EOF
 
       - name: Run bot
@@ -74,11 +84,12 @@ jobs:
           # Telegram
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Bright Data proxy résidentiel (bypass Cloudflare LBC + LaCentrale)
-          BRD_HOST: ${{ secrets.BRD_HOST }}
-          BRD_PORT: ${{ secrets.BRD_PORT }}
-          BRD_USER: ${{ secrets.BRD_USER }}
-          BRD_PASS: ${{ secrets.BRD_PASS }}
+          # Bright Data proxy (bypass Cloudflare LBC + LaCentrale)
+          BRD_HOST:        ${{ secrets.BRD_HOST }}
+          BRD_PORT:        ${{ secrets.BRD_PORT }}
+          BRD_SOCKS5_PORT: ${{ secrets.BRD_SOCKS5_PORT }}
+          BRD_USER:        ${{ secrets.BRD_USER }}
+          BRD_PASS:        ${{ secrets.BRD_PASS }}
         run: |
           MODE="${{ github.event.inputs.mode }}"
           if [ "$MODE" = "seed" ]; then

@@ -113,8 +113,17 @@ def process_callbacks(state: "State") -> None:
     url = TELEGRAM_API.format(token=token, method="getUpdates")
     try:
         r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 409:
+            # Conflit : une autre instance a un long-poll actif.
+            # On résout en consommant immédiatement (timeout=0) pour libérer le verrou.
+            print("[callback] getUpdates 409 — conflit polling, résolution...")
+            try:
+                requests.get(url, params={"timeout": 0, "offset": -1}, timeout=5)
+            except Exception:
+                pass
+            return  # On skip ce run, le prochain fonctionnera normalement
         if r.status_code != 200:
-            print(f"[callback] getUpdates {r.status_code}")
+            print(f"[callback] getUpdates {r.status_code}: {r.text[:100]}")
             return
         updates = r.json().get("result", [])
     except requests.RequestException as e:
