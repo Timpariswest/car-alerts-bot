@@ -48,16 +48,25 @@ jobs:
           if not (host and user and pwd):
               print("⚠️  Secrets BRD_HOST/BRD_USER/BRD_PASS non configurés — proxy désactivé")
               sys.exit(0)
-          proxy_url = f"http://{user}:{pwd}@{host}:{port}"
-          print(f"Proxy configuré : {host}:{port} (user={user[:6]}...)")
+          from urllib.parse import quote as _q
+          proxy_url = f"http://{_q(user,safe='')}:{_q(pwd,safe='')}@{host}:{port}"
+          print(f"Proxy configuré : {host}:{port} (user={user[:12]}...)")
+          # Test 1 : requests standard (plus fiable pour proxy CONNECT)
           try:
-              from curl_cffi import requests as cf
-              s = cf.Session(impersonate="chrome124", proxies={"http": proxy_url, "https": proxy_url})
-              r = s.get("https://httpbin.org/ip", timeout=20, verify=False)
-              print(f"✅ Proxy OK — IP sortante : {r.json().get('origin','?')}")
-          except Exception as e:
-              print(f"❌ Proxy KO : {e}")
-              print("→ Vérifie ton abonnement Bright Data et les secrets GitHub")
+              import requests as req
+              r = req.get("https://httpbin.org/ip", proxies={"http": proxy_url, "https": proxy_url}, timeout=20, verify=False)
+              print(f"✅ Proxy OK (requests) — IP sortante : {r.json().get('origin','?')}")
+          except Exception as e1:
+              print(f"⚠️  requests KO : {e1}")
+              # Test 2 : curl_cffi sans impersonation
+              try:
+                  from curl_cffi import requests as cf
+                  s = cf.Session(proxies={"http": proxy_url, "https": proxy_url})
+                  r = s.get("https://httpbin.org/ip", timeout=20, verify=False)
+                  print(f"✅ Proxy OK (curl_cffi sans impersonation) — IP : {r.json().get('origin','?')}")
+              except Exception as e2:
+                  print(f"❌ Proxy KO : {e2}")
+                  print("→ Vérifie ton abonnement Bright Data et les secrets GitHub")
           EOF
 
       - name: Run bot
