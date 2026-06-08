@@ -186,26 +186,45 @@ def _parse_year(val) -> Optional[int]:
 # ---------------------------------------------------------------------------
 # LeBonCoin — API interne (clé publique) via curl_cffi
 # ---------------------------------------------------------------------------
-def _fetch_lbc(session, is_cf: bool, verify: bool = True) -> List[Listing]:
-    """Scrape LeBonCoin via API JSON interne + fallback HTML."""
+def _fetch_lbc(proxy_session=None, proxy_is_cf: bool = False, direct_session=None, direct_is_cf: bool = False) -> List[Listing]:
+    """
+    Scrape LeBonCoin via API JSON interne.
+    Stratégie : essai direct (curl_cffi Chrome) → si échec et proxy dispo, retry via proxy.
+    Fallback HTML si API entièrement bloquée.
+    """
     url_api = "https://api.leboncoin.fr/api/adfinder/v1/search"
-    headers_api = {
-        "User-Agent": UA_CHROME,
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "fr-FR,fr;q=0.9",
-        "Content-Type": "application/json",
-        "api_key": "ba0c2dad52b3565fd92a81af2b6386d7",
-        "Origin": "https://www.leboncoin.fr",
-        "Referer": "https://www.leboncoin.fr/",
-        "X-Source-Type": "web",
-    }
 
-    searches = [("clio 3", "clio"), ("clio iii", "clio"), ("peugeot 207", "207")]
+    # LBC a plusieurs clés API selon les déploiements — on les essaie toutes
+    API_KEYS = [
+        "ba0c2dad52b3565fd92a81af2b6386d7",  # clé historique
+        "9a9d5cf76f55c6fb2f31c8c23e8e5e55",  # clé alternative
+    ]
+
+    def _make_headers(api_key):
+        return {
+            "User-Agent": UA_CHROME,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "fr-FR,fr;q=0.9",
+            "Content-Type": "application/json",
+            "api_key": api_key,
+            "Origin": "https://www.leboncoin.fr",
+            "Referer": "https://www.leboncoin.fr/voitures/occasions/",
+            "X-Source-Type": "web",
+        }
+
+    searches = [("renault clio 3", "clio3"), ("renault clio iii", "clio3"), ("peugeot 207", "207")]
     all_listings: List[Listing] = []
     api_total = 0
 
-    print("[scraper] LeBonCoin API...")
-    for text, _ in searches:
+    # Sessions à essayer : direct d'abord, proxy en secours
+    sessions_to_try = []
+    if direct_session:
+        sessions_to_try.append((direct_session, direct_is_cf, True, "direct"))   # verify=True
+    if proxy_session and HAS_PROXY:
+        sessions_to_try.append((proxy_session, proxy_is_cf, False, "proxy"))      # verify=False (BRD SSL interception)
+
+    print("[scraper] LeBonCoin API (essai direct puis proxy)...")
+    for text, label in searches:
         payload = {
             "limit": 35,
             "filters": {
@@ -221,38 +240,52 @@ def _fetch_lbc(session, is_cf: bool, verify: bool = True) -> List[Listing]:
             "sort_order": "desc",
             "owner": {"type": "all"},
         }
-        r = _cf_post(session, url_api, payload, headers_api, is_cf=is_cf, verify=verify)
-        if r and r.status_code == 200:
-            try:
-                data = r.json()
-                lst = _parse_lbc_json(data)
-                print(f"  [LBC API '{text}'] {len(lst)} annonces")
-                all_listings.extend(lst)
-                api_total += len(lst)
-            except Exception as e:
-                print(f"  [LBC API '{text}'] parse error: {e}")
-        else:
-            code = r.status_code if r else "err"
-            print(f"  [LBC API '{text}'] HTTP {code}")
+        success = False
+        for sess, is_cf, verify, sess_label in sessions_to_try:
+            for api_key in API_KEYS:
+                r = _cf_post(sess, url_api, payload, _make_headers(api_key), is_cf=is_cf, verify=verify)
+                if r and r.status_code == 200:
+                    try:
+                        data = r.json()
+                        lst = _parse_lbc_json(data)
+                        print(f"  [LBC API '{text}' via {sess_label}] {len(lst)} annonces (clé={api_key[:8]}...)")
+                        all_listings.extend(lst)
+                        api_total += len(lst)
+                        success = True
+                        break
+                    except Exception as e:
+                        print(f"  [LBC API '{text}' via {sess_label}] parse error: {e}")
+                elif r:
+                    print(f"  [LBC API '{text}' via {sess_label}] HTTP {r.status_code} (clé={api_key[:8]}...)")
+                else:
+                    print(f"  [LBC API '{text}' via {sess_label}] Pas de réponse")
+            if success:
+                break
+            time.sleep(1)
         time.sleep(1.5)
 
     if api_total > 0:
         return all_listings
 
-    # Fallback HTML si API bloquée
+    # ── Fallback HTML ─────────────────────────────────────────────────────────
     print("[scraper] LBC API = 0 → fallback HTML (CF bypass)...")
-    # Warmup cookie
-    _cf_get(session, "https://www.leboncoin.fr/", is_cf=is_cf, retries=0, verify=verify)
-    time.sleep(2)
-
-    for text, _ in searches:
-        url = f"https://www.leboncoin.fr/recherche?category=2&text={requests.utils.quote(text)}&price_max=3000&mileage_max=260000&sort=time&order=desc"
-        r = _cf_get(session, url, is_cf=is_cf, verify=verify)
-        if r:
-            lst = _parse_lbc_next_data(r.text)
-            print(f"  [LBC HTML '{text}'] {len(lst)} annonces")
-            all_listings.extend(lst)
+    for sess, is_cf, verify, sess_label in sessions_to_try:
+        # Warmup cookie LBC
+        _cf_get(sess, "https://www.leboncoin.fr/", is_cf=is_cf, retries=0, verify=verify)
         time.sleep(2)
+        for text, _ in searches:
+            url = (
+                f"https://www.leboncoin.fr/voitures/occasions/recherche"
+                f"?text={requests.utils.quote(text)}&price_max=3000&mileage_max=260000&sort=time&order=desc"
+            )
+            r = _cf_get(sess, url, is_cf=is_cf, verify=verify)
+            if r:
+                lst = _parse_lbc_next_data(r.text)
+                print(f"  [LBC HTML '{text}' via {sess_label}] {len(lst)} annonces")
+                all_listings.extend(lst)
+            time.sleep(2)
+        if all_listings:
+            break  # une session a suffi
 
     return all_listings
 
@@ -752,17 +785,18 @@ def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
     direct_session, direct_is_cf = _make_direct_session()  # sans proxy (AS24)
     all_listings: List[Listing] = []
 
-    # 1. LeBonCoin via proxy Bright Data
-    if HAS_PROXY:
-        print("[scraper] LeBonCoin (proxy Bright Data)...")
-        try:
-            lbc = _fetch_lbc(proxy_session, proxy_is_cf, verify=False)
-            all_listings.extend(lbc)
-        except Exception as e:
-            print(f"[scraper] LBC erreur: {e}")
-            traceback.print_exc()
-    else:
-        print("[scraper] LBC ignoré (pas de proxy configuré)")
+    # 1. LeBonCoin — direct d'abord, proxy en secours si dispo
+    print("[scraper] LeBonCoin...")
+    try:
+        lbc = _fetch_lbc(
+            proxy_session=proxy_session, proxy_is_cf=proxy_is_cf,
+            direct_session=direct_session, direct_is_cf=direct_is_cf,
+        )
+        all_listings.extend(lbc)
+        print(f"[scraper] LBC total: {len(lbc)} annonces")
+    except Exception as e:
+        print(f"[scraper] LBC erreur: {e}")
+        traceback.print_exc()
 
     # 2. Sources HTML
     src_list = sources or HTML_SOURCES
