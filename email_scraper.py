@@ -165,73 +165,84 @@ def _extract_block(a_tag, soup_root=None) -> tuple[str, Optional[str]]:
 
 
 def _parse_lbc_email(html: str) -> List[Listing]:
-    """Parse un email d'alerte LeBonCoin."""
+    """
+    Parse un email d'alerte LeBonCoin.
+    Chaque email contient une ou plusieurs cartes d'annonce en HTML.
+    On ne prend que les liens /ad/voitures/ (pas motos, immo, etc.)
+    """
     soup = BeautifulSoup(html, "lxml")
     listings = []
 
-    # Patterns pour trouver l'ID annonce dans tous les types de liens LBC :
-    # - direct : leboncoin.fr/ad/voitures/123456789
-    # - redirect tracking : click.email.leboncoin.fr/...?...adid=123456789...
-    # - embed JSON : {"adid":"123456789"} ou {"id":"123456789"}
-    id_patterns = [
-        re.compile(r"leboncoin\.fr/ad/(?:voitures?|auto)/(\d{7,})", re.IGNORECASE),
-        re.compile(r"leboncoin\.fr/voitures/occasions/(\d{7,})", re.IGNORECASE),
-        re.compile(r"[?&/](?:adid|ad_id|list_id|id)=(\d{7,})", re.IGNORECASE),
-        re.compile(r"/(\d{9,})(?:[/?#]|$)"),   # ID long dans le chemin URL
-    ]
-
-    # Debug : affiche les 5 premiers hrefs pour diagnostic
-    all_hrefs = [a.get("href", "") for a in soup.find_all("a", href=True)]
-    lbc_hrefs = [h for h in all_hrefs if "leboncoin" in h.lower() or "lbc" in h.lower()]
-    if lbc_hrefs:
-        print(f"  [email LBC debug] {len(lbc_hrefs)} liens LBC — exemples: {lbc_hrefs[:3]}")
-    else:
-        print(f"  [email LBC debug] 0 liens leboncoin trouvés sur {len(all_hrefs)} liens totaux")
-        if all_hrefs:
-            print(f"  [email LBC debug] exemples liens: {all_hrefs[:3]}")
-
+    # Uniquement les annonces voitures (filtre catégorie)
+    id_pat = re.compile(r"leboncoin\.fr/ad/voitures/(\d{7,})", re.IGNORECASE)
     seen = set()
+
     for a in soup.find_all("a", href=True):
         href = a.get("href", "")
-        listing_id = None
-        for pat in id_patterns:
-            m = pat.search(href)
-            if m:
-                listing_id = m.group(1)
-                break
-        if not listing_id or listing_id in seen:
+        m = id_pat.search(href)
+        if not m:
+            continue
+        listing_id = m.group(1)
+        if listing_id in seen:
             continue
         seen.add(listing_id)
 
-        bt, image_url = _extract_block(a)
+        # ── Chercher la carte annonce autour du lien ──────────────────────
+        # On remonte PRUDEMMENT : max 6 niveaux, on s'arrête dès qu'on a
+        # un bloc avec du contenu significatif (price, km) mais pas trop
+        # grand (évite de prendre tout le body/email)
+        card = a.parent
+        for _ in range(6):
+            if not card or not card.parent:
+                break
+            card_text = card.get_text(" ", strip=True)
+            # Un bon bloc contient prix ou km et fait < 800 chars
+            has_price = bool(re.search(r"\d[\d\s]{2,5}[\s€]", card_text))
+            has_km    = bool(re.search(r"\d[\d\s]{2,5}\s*km", card_text, re.IGNORECASE))
+            if (has_price or has_km) and len(card_text) < 800:
+                break
+            card = card.parent
 
-        # Titre : chercher dans le bloc
+        card_text = card.get_text(" ", strip=True) if card else ""
+
+        # ── Image ─────────────────────────────────────────────────────────
+        img_tag = card.find("img") if card else None
+        image_url = None
+        if img_tag:
+            src = img_tag.get("src") or img_tag.get("data-src", "")
+            # Ignorer les images de tracking/logo (trop petites ou pas d'extension image)
+            if src and re.search(r"\.(jpg|jpeg|png|webp)", src, re.IGNORECASE):
+                image_url = src
+
+        # ── Titre ─────────────────────────────────────────────────────────
+        # Cherche un élément texte court qui ressemble à un nom de véhicule
         title = ""
-        block = a
-        for _ in range(8):
-            p = block.parent
-            if not p or len(p.get_text(strip=True)) > 60:
-                block = p or block
-                break
-            block = p
-        for tag in block.find_all(["h2", "h3", "h4", "strong", "b", "p"]):
-            t = clean_text(tag.get_text(" ", strip=True))
-            if 5 < len(t) < 120:
-                title = t
-                break
+        if card:
+            for tag in card.find_all(["h1","h2","h3","h4","strong","b","span","p","td"]):
+                t = clean_text(tag.get_text(" ", strip=True))
+                # Un bon titre : 5-80 chars, pas un prix ou km, pas une date
+                if (5 < len(t) < 80
+                        and not re.match(r"^[\d\s€,]+$", t)
+                        and "km" not in t.lower()[:10]
+                        and not re.match(r"^\d{1,2}/\d{4}", t)):
+                    title = t
+                    break
         if not title:
-            title = clean_text(a.get_text(" ", strip=True)) or "LeBonCoin"
+            title = "LeBonCoin"
+
+        # ── Prix / km / année depuis le texte du bloc ─────────────────────
+        price = _parse_price(card_text)
+        km    = _parse_km(card_text)
+        year  = _parse_year(card_text)
 
         listings.append(Listing(
             site="leboncoin", listing_id=listing_id,
             title=title[:200],
-            price=_parse_price(bt),
-            year=_parse_year(bt),
-            mileage=_parse_km(bt),
+            price=price, year=year, mileage=km,
             location=None,
             url=f"https://www.leboncoin.fr/ad/voitures/{listing_id}",
             image_url=image_url,
-            description=bt[:300],
+            description=clean_text(card_text)[:300],
         ))
 
     return listings
