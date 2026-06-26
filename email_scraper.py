@@ -34,7 +34,7 @@ from parsers.common import clean_text
 # ---------------------------------------------------------------------------
 SENDERS = {
     "leboncoin":  ["alertes@leboncoin.fr", "noreply@leboncoin.fr", "leboncoin.fr"],
-    "lacentrale": ["alerte@lacentrale.fr",  "noreply@lacentrale.fr", "lacentrale.fr"],
+    "lacentrale": ["alerte@lacentrale.fr"],  # UNIQUEMENT les alertes de recherche, pas les messages acheteurs (no_reply@)
     "autoscout24": ["noreply@autoscout24.fr", "autoscout24.fr", "autoscout24.com"],
 }
 
