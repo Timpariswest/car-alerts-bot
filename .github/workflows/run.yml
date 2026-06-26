@@ -84,7 +84,12 @@ jobs:
           # Telegram
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Bright Data proxy (bypass Cloudflare LBC + LaCentrale)
+          # Gmail alertes email (source principale)
+          GMAIL_LBC_USER:  ${{ secrets.GMAIL_LBC_USER }}
+          GMAIL_LBC_PASS:  ${{ secrets.GMAIL_LBC_PASS }}
+          GMAIL_MAIN_USER: ${{ secrets.GMAIL_MAIN_USER }}
+          GMAIL_MAIN_PASS: ${{ secrets.GMAIL_MAIN_PASS }}
+          # Bright Data proxy (fallback LBC/LaCentrale si email KO)
           BRD_HOST:        ${{ secrets.BRD_HOST }}
           BRD_PORT:        ${{ secrets.BRD_PORT }}
           BRD_SOCKS5_PORT: ${{ secrets.BRD_SOCKS5_PORT }}

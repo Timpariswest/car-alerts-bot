@@ -824,24 +824,35 @@ def _fetch_html_source(proxy_session, proxy_is_cf: bool, direct_session, direct_
 # Point d'entrée public
 # ---------------------------------------------------------------------------
 def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
-    proxy_session, proxy_is_cf = _make_cf_session()    # avec proxy Bright Data
-    direct_session, direct_is_cf = _make_direct_session()  # sans proxy (AS24)
     all_listings: List[Listing] = []
 
+    # 0. Alertes email (LBC + LaCentrale + AS24) — source principale, pas de proxy nécessaire
+    try:
+        from email_scraper import fetch_email_listings
+        print("[scraper] Alertes email...")
+        email_listings = fetch_email_listings()
+        all_listings.extend(email_listings)
+    except Exception as e:
+        print(f"[scraper] Email scraper erreur: {e}")
+        traceback.print_exc()
+
+    proxy_session, proxy_is_cf = _make_cf_session()    # avec proxy Bright Data
+    direct_session, direct_is_cf = _make_direct_session()  # sans proxy (AS24)
+
     # 1. LeBonCoin — direct d'abord, proxy en secours si dispo
-    print("[scraper] LeBonCoin...")
+    print("[scraper] LeBonCoin API (direct + proxy)...")
     try:
         lbc = _fetch_lbc(
             proxy_session=proxy_session, proxy_is_cf=proxy_is_cf,
             direct_session=direct_session, direct_is_cf=direct_is_cf,
         )
         all_listings.extend(lbc)
-        print(f"[scraper] LBC total: {len(lbc)} annonces")
+        print(f"[scraper] LBC API total: {len(lbc)} annonces")
     except Exception as e:
         print(f"[scraper] LBC erreur: {e}")
         traceback.print_exc()
 
-    # 2. Sources HTML
+    # 2. Sources HTML (AS24 direct + LaCentrale via proxy)
     src_list = sources or HTML_SOURCES
     print(f"[scraper] Sources HTML ({len(src_list)})...")
     for entry in src_list:
@@ -852,7 +863,7 @@ def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
             print(f"  [{entry.get('label')}] Exception: {e}")
         time.sleep(1.5)
 
-    # Dédup
+    # Dédup global
     seen_uids: dict = {}
     for l in all_listings:
         if l.uid not in seen_uids:
