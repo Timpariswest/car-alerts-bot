@@ -67,5 +67,5 @@ jobs:
           git add state.json || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: update state [skip ci]"
-            git push
+            git pull --rebase && git push || true
           fi
