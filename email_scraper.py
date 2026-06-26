@@ -18,7 +18,11 @@ import email as _email_lib
 import imaplib
 import os
 import re
+import socket
 from typing import List, Optional
+
+# Timeout global pour toutes les connexions réseau (IMAP inclus)
+socket.setdefaulttimeout(20)
 
 from bs4 import BeautifulSoup
 
@@ -94,7 +98,7 @@ def _fetch_gmail_htmls(username: str, password: str, sender_patterns: list[str],
     """
     html_bodies = []
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=20)
         mail.login(username, password)
         mail.select("INBOX")
 
@@ -105,6 +109,8 @@ def _fetch_gmail_htmls(username: str, password: str, sender_patterns: list[str],
             msg_ids = data[0].split()
             if not msg_ids:
                 continue
+            # Max 10 emails par pattern pour éviter de bloquer trop longtemps
+            msg_ids = msg_ids[-10:]
             print(f"  [email] {len(msg_ids)} email(s) non lu(s) de '{pattern}'")
             for msg_id in msg_ids:
                 try:
@@ -124,7 +130,9 @@ def _fetch_gmail_htmls(username: str, password: str, sender_patterns: list[str],
         mail.logout()
     except imaplib.IMAP4.error as e:
         print(f"  [email] IMAP auth/connexion KO ({label}): {e}")
-        print("  [email] → Vérifie que l'IMAP est activé dans Gmail + que le mot de passe est un App Password")
+        print("  [email] → Vérifie IMAP activé dans Gmail + App Password (pas ton vrai mdp)")
+    except socket.timeout:
+        print(f"  [email] IMAP timeout ({label}) — Gmail inaccessible depuis GitHub Actions")
     except Exception as e:
         print(f"  [email] Erreur inattendue ({label}): {type(e).__name__}: {e}")
     return html_bodies
