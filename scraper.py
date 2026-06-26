@@ -786,16 +786,15 @@ SITE_PARSERS = {
 }
 
 HTML_SOURCES = [
-    # AutoScout24 — sans proxy (pas bloqué)
-    {"site": "autoscout24", "label": "AS24 Clio", "proxy": False,
-     "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
-    {"site": "autoscout24", "label": "AS24 207", "proxy": False,
-     "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C"},
-    # LaCentrale — proxy Bright Data requis
-    {"site": "lacentrale", "label": "LaCentrale Clio 3", "proxy": True,
-     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=RENAULT%3ACLIO+3&mileageMax=260000&priceMax=3000"},
-    {"site": "lacentrale", "label": "LaCentrale 207", "proxy": True,
-     "url": "https://www.lacentrale.fr/listing?makesModelsCommercialNames=PEUGEOT%3A207&mileageMax=260000&priceMax=3000"},
+    # AutoScout24 — sans proxy (pas bloqué) — pages 1 et 2 pour plus d'annonces fraîches
+    {"site": "autoscout24", "label": "AS24 Clio p1", "proxy": False,
+     "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C&page=1"},
+    {"site": "autoscout24", "label": "AS24 Clio p2", "proxy": False,
+     "url": "https://www.autoscout24.fr/lst/renault/clio?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C&page=2"},
+    {"site": "autoscout24", "label": "AS24 207 p1", "proxy": False,
+     "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C&page=1"},
+    {"site": "autoscout24", "label": "AS24 207 p2", "proxy": False,
+     "url": "https://www.autoscout24.fr/lst/peugeot/207?mmvco=1&ustate=N%2CU&sort=age&desc=1&milemax=260000&priceto=3000&cy=F&atype=C&page=2"},
 ]
 
 

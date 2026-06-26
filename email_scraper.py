@@ -175,8 +175,17 @@ def _parse_lbc_email(html: str) -> List[Listing]:
 
     # Uniquement les annonces voitures (filtre catégorie)
     id_pat = re.compile(r"leboncoin\.fr/ad/voitures/(\d{7,})", re.IGNORECASE)
-    seen = set()
+    # Texte complet de l'email (chaque email LBC = 1 annonce → on peut tout scanner)
+    full_text = soup.get_text(" ", strip=True)
+    # Image principale (première image avec extension photo)
+    main_image = None
+    for img in soup.find_all("img"):
+        src = img.get("src") or img.get("data-src", "")
+        if src and re.search(r"\.(jpg|jpeg|png|webp)", src, re.IGNORECASE):
+            main_image = src
+            break
 
+    seen = set()
     for a in soup.find_all("a", href=True):
         href = a.get("href", "")
         m = id_pat.search(href)
@@ -187,53 +196,32 @@ def _parse_lbc_email(html: str) -> List[Listing]:
             continue
         seen.add(listing_id)
 
-        # ── Chercher la carte annonce autour du lien ──────────────────────
-        # On remonte PRUDEMMENT : max 6 niveaux, on s'arrête dès qu'on a
-        # un bloc avec du contenu significatif (price, km) mais pas trop
-        # grand (évite de prendre tout le body/email)
-        card = a.parent
-        for _ in range(6):
-            if not card or not card.parent:
-                break
-            card_text = card.get_text(" ", strip=True)
-            # Un bon bloc contient prix ou km et fait < 800 chars
-            has_price = bool(re.search(r"\d[\d\s]{2,5}[\s€]", card_text))
-            has_km    = bool(re.search(r"\d[\d\s]{2,5}\s*km", card_text, re.IGNORECASE))
-            if (has_price or has_km) and len(card_text) < 800:
-                break
-            card = card.parent
-
-        card_text = card.get_text(" ", strip=True) if card else ""
-
-        # ── Image ─────────────────────────────────────────────────────────
-        img_tag = card.find("img") if card else None
-        image_url = None
-        if img_tag:
-            src = img_tag.get("src") or img_tag.get("data-src", "")
-            # Ignorer les images de tracking/logo (trop petites ou pas d'extension image)
-            if src and re.search(r"\.(jpg|jpeg|png|webp)", src, re.IGNORECASE):
-                image_url = src
-
-        # ── Titre ─────────────────────────────────────────────────────────
-        # Cherche un élément texte court qui ressemble à un nom de véhicule
+        # Titre : cherche un texte court qui ressemble à un nom de véhicule
+        # dans les éléments proches du lien (pas tout l'email)
         title = ""
-        if card:
-            for tag in card.find_all(["h1","h2","h3","h4","strong","b","span","p","td"]):
+        node = a
+        for _ in range(5):
+            if not node or not node.parent:
+                break
+            node = node.parent
+            for tag in node.find_all(["h1","h2","h3","h4","strong","b"]):
                 t = clean_text(tag.get_text(" ", strip=True))
-                # Un bon titre : 5-80 chars, pas un prix ou km, pas une date
-                if (5 < len(t) < 80
-                        and not re.match(r"^[\d\s€,]+$", t)
-                        and "km" not in t.lower()[:10]
-                        and not re.match(r"^\d{1,2}/\d{4}", t)):
+                if (6 < len(t) < 80
+                        and not re.match(r"^[\d\s€,\.]+$", t)
+                        and not t.lower().startswith("bonjour")
+                        and "km" not in t.lower()[:8]):
                     title = t
                     break
+            if title:
+                break
         if not title:
             title = "LeBonCoin"
 
-        # ── Prix / km / année depuis le texte du bloc ─────────────────────
-        price = _parse_price(card_text)
-        km    = _parse_km(card_text)
-        year  = _parse_year(card_text)
+        # Prix / km / année : scanne le texte complet de l'email
+        # (fiable car 1 annonce par email)
+        price = _parse_price(full_text)
+        km    = _parse_km(full_text)
+        year  = _parse_year(full_text)
 
         listings.append(Listing(
             site="leboncoin", listing_id=listing_id,
@@ -241,8 +229,8 @@ def _parse_lbc_email(html: str) -> List[Listing]:
             price=price, year=year, mileage=km,
             location=None,
             url=f"https://www.leboncoin.fr/ad/voitures/{listing_id}",
-            image_url=image_url,
-            description=clean_text(card_text)[:300],
+            image_url=main_image,
+            description=clean_text(full_text[:400]),
         ))
 
     return listings
