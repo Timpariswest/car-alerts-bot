@@ -168,18 +168,38 @@ def _parse_lbc_email(html: str) -> List[Listing]:
     """Parse un email d'alerte LeBonCoin."""
     soup = BeautifulSoup(html, "lxml")
     listings = []
-    id_pat = re.compile(r"leboncoin\.fr/ad/(?:voitures?|auto)/(\d+)", re.IGNORECASE)
-    # Aussi: /voitures/occasions/ ancien format
-    id_pat2 = re.compile(r"leboncoin\.fr/voitures/occasions/(\d+)", re.IGNORECASE)
-    seen = set()
 
+    # Patterns pour trouver l'ID annonce dans tous les types de liens LBC :
+    # - direct : leboncoin.fr/ad/voitures/123456789
+    # - redirect tracking : click.email.leboncoin.fr/...?...adid=123456789...
+    # - embed JSON : {"adid":"123456789"} ou {"id":"123456789"}
+    id_patterns = [
+        re.compile(r"leboncoin\.fr/ad/(?:voitures?|auto)/(\d{7,})", re.IGNORECASE),
+        re.compile(r"leboncoin\.fr/voitures/occasions/(\d{7,})", re.IGNORECASE),
+        re.compile(r"[?&/](?:adid|ad_id|list_id|id)=(\d{7,})", re.IGNORECASE),
+        re.compile(r"/(\d{9,})(?:[/?#]|$)"),   # ID long dans le chemin URL
+    ]
+
+    # Debug : affiche les 5 premiers hrefs pour diagnostic
+    all_hrefs = [a.get("href", "") for a in soup.find_all("a", href=True)]
+    lbc_hrefs = [h for h in all_hrefs if "leboncoin" in h.lower() or "lbc" in h.lower()]
+    if lbc_hrefs:
+        print(f"  [email LBC debug] {len(lbc_hrefs)} liens LBC — exemples: {lbc_hrefs[:3]}")
+    else:
+        print(f"  [email LBC debug] 0 liens leboncoin trouvés sur {len(all_hrefs)} liens totaux")
+        if all_hrefs:
+            print(f"  [email LBC debug] exemples liens: {all_hrefs[:3]}")
+
+    seen = set()
     for a in soup.find_all("a", href=True):
         href = a.get("href", "")
-        m = id_pat.search(href) or id_pat2.search(href)
-        if not m:
-            continue
-        listing_id = m.group(1)
-        if listing_id in seen:
+        listing_id = None
+        for pat in id_patterns:
+            m = pat.search(href)
+            if m:
+                listing_id = m.group(1)
+                break
+        if not listing_id or listing_id in seen:
             continue
         seen.add(listing_id)
 
