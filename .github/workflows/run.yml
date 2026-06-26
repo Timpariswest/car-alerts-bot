@@ -84,11 +84,13 @@ jobs:
           # Telegram
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Gmail alertes email (source principale)
-          GMAIL_LBC_USER:  ${{ secrets.GMAIL_LBC_USER }}
-          GMAIL_LBC_PASS:  ${{ secrets.GMAIL_LBC_PASS }}
-          GMAIL_MAIN_USER: ${{ secrets.GMAIL_MAIN_USER }}
-          GMAIL_MAIN_PASS: ${{ secrets.GMAIL_MAIN_PASS }}
+          # Gmail alertes email — tous les noms de secrets supportés
+          GMAIL_USER:           ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD:   ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_USER_1:         ${{ secrets.GMAIL_USER_1 }}
+          GMAIL_APP_PASSWORD_1: ${{ secrets.GMAIL_APP_PASSWORD_1 }}
+          GMAIL_USER_2:         ${{ secrets.GMAIL_USER_2 }}
+          GMAIL_APP_PASSWORD_2: ${{ secrets.GMAIL_APP_PASSWORD_2 }}
           # Bright Data proxy (fallback LBC/LaCentrale si email KO)
           BRD_HOST:        ${{ secrets.BRD_HOST }}
           BRD_PORT:        ${{ secrets.BRD_PORT }}

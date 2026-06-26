@@ -319,41 +319,58 @@ EMAIL_PARSERS = {
 # ---------------------------------------------------------------------------
 # Point d'entrée public
 # ---------------------------------------------------------------------------
+def _get_gmail_accounts() -> list[tuple[str, str]]:
+    """
+    Retourne la liste des comptes Gmail configurés (user, password).
+    Supporte les noms de secrets :
+      GMAIL_USER / GMAIL_APP_PASSWORD
+      GMAIL_USER_1 / GMAIL_APP_PASSWORD_1
+      GMAIL_USER_2 / GMAIL_APP_PASSWORD_2
+      GMAIL_LBC_USER / GMAIL_LBC_PASS
+      GMAIL_MAIN_USER / GMAIL_MAIN_PASS
+    """
+    pairs = [
+        (os.getenv("GMAIL_USER",   ""), os.getenv("GMAIL_APP_PASSWORD",   "")),
+        (os.getenv("GMAIL_USER_1", ""), os.getenv("GMAIL_APP_PASSWORD_1", "")),
+        (os.getenv("GMAIL_USER_2", ""), os.getenv("GMAIL_APP_PASSWORD_2", "")),
+        (os.getenv("GMAIL_LBC_USER",  ""), os.getenv("GMAIL_LBC_PASS",  "")),
+        (os.getenv("GMAIL_MAIN_USER", ""), os.getenv("GMAIL_MAIN_PASS", "")),
+    ]
+    # Déduplique par user (on garde le premier mot de passe trouvé pour chaque compte)
+    seen: dict[str, str] = {}
+    for user, pwd in pairs:
+        if user and pwd and user not in seen:
+            seen[user] = pwd
+    return list(seen.items())
+
+
 def fetch_email_listings() -> List[Listing]:
     """
     Récupère toutes les annonces depuis les alertes email Gmail.
-    Retourne une liste de Listing (déduplicés par uid).
+    Scanne TOUS les comptes configurés pour TOUTES les sources
+    → pas besoin de savoir quel compte reçoit quoi.
     """
     all_listings: List[Listing] = []
 
-    # ── Compte LBC : timdelmas123@gmail.com ─────────────────────────────────
-    lbc_user = os.getenv("GMAIL_LBC_USER", "")
-    lbc_pass = os.getenv("GMAIL_LBC_PASS", "")
-    if lbc_user and lbc_pass:
-        print(f"[email] LeBonCoin — compte {lbc_user}")
-        htmls = _fetch_gmail_htmls(lbc_user, lbc_pass, SENDERS["leboncoin"], label="LBC")
-        print(f"[email] {len(htmls)} email(s) LBC traité(s)")
-        for html in htmls:
-            lst = _parse_lbc_email(html)
-            print(f"  [email LBC] {len(lst)} annonce(s) extraite(s)")
-            all_listings.extend(lst)
-    else:
-        print("[email] GMAIL_LBC_USER/PASS non configurés — LBC email désactivé")
+    accounts = _get_gmail_accounts()
+    if not accounts:
+        print("[email] Aucun compte Gmail configuré — email scraper désactivé")
+        print("[email] → Ajoute GMAIL_USER_1 + GMAIL_APP_PASSWORD_1 (et _2) dans les secrets GitHub")
+        return []
 
-    # ── Compte principal : chabodt@gmail.com ────────────────────────────────
-    main_user = os.getenv("GMAIL_MAIN_USER", "")
-    main_pass = os.getenv("GMAIL_MAIN_PASS", "")
-    if main_user and main_pass:
-        for source in ["lacentrale", "autoscout24"]:
-            print(f"[email] {source} — compte {main_user}")
-            htmls = _fetch_gmail_htmls(main_user, main_pass, SENDERS[source], label=source)
-            print(f"[email] {len(htmls)} email(s) {source} traité(s)")
+    print(f"[email] {len(accounts)} compte(s) Gmail configuré(s)")
+
+    for user, pwd in accounts:
+        print(f"[email] Scan de {user}...")
+        for source, patterns in SENDERS.items():
+            htmls = _fetch_gmail_htmls(user, pwd, patterns, label=f"{source}@{user[:15]}")
+            if htmls:
+                print(f"  [email] {len(htmls)} email(s) {source} sur {user}")
             for html in htmls:
                 lst = EMAIL_PARSERS[source](html)
-                print(f"  [email {source}] {len(lst)} annonce(s) extraite(s)")
+                if lst:
+                    print(f"  [email {source}] {len(lst)} annonce(s) extraite(s)")
                 all_listings.extend(lst)
-    else:
-        print("[email] GMAIL_MAIN_USER/PASS non configurés — LaCentrale/AS24 email désactivé")
 
     # Dédup
     seen_uids: dict = {}
