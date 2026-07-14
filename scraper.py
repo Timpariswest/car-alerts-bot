@@ -848,6 +848,14 @@ def fetch_listings(sources: Optional[List[dict]] = None) -> List[Listing]:
             print(f"  [{entry.get('label')}] Exception: {e}")
         time.sleep(1)
 
+    # 2. LeBonCoin API directe (ne depend pas des emails Gmail)
+    print("[scraper] LeBonCoin API directe...")
+    try:
+        lbc_listings = _fetch_lbc(proxy_session, proxy_is_cf, direct_session, direct_is_cf)
+        all_listings.extend(lbc_listings)
+    except Exception as e:
+        print(f"[scraper] LBC direct erreur: {e}")
+        traceback.print_exc()
     # Dédup global
     seen_uids: dict = {}
     for l in all_listings:
