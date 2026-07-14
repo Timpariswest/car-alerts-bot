@@ -265,6 +265,12 @@ def _fetch_lbc(proxy_session=None, proxy_is_cf: bool = False, direct_session=Non
         sessions_to_try.append((direct_session, direct_is_cf, True, "direct"))   # verify=True
     if proxy_session and HAS_PROXY:
         sessions_to_try.append((proxy_session, proxy_is_cf, False, "proxy"))      # verify=False (BRD SSL interception)
+    # Fallback HTTP proxy port 22225 — tente si SOCKS5 timeout depuis GitHub Actions
+    if HAS_PROXY and _PROXIES:
+        _http_sess = requests.Session()
+        _http_sess.proxies.update(_PROXIES)
+        _http_sess.verify = False
+        sessions_to_try.append((_http_sess, False, False, "http-proxy"))
 
     print("[scraper] LeBonCoin API (essai direct puis proxy)...")
     for text, label in searches:
@@ -286,7 +292,7 @@ def _fetch_lbc(proxy_session=None, proxy_is_cf: bool = False, direct_session=Non
         success = False
         for sess, is_cf, verify, sess_label in sessions_to_try:
             for api_key in API_KEYS:
-                r = _cf_post(sess, url_api, payload, _make_headers(api_key), is_cf=is_cf, verify=verify)
+                r = _cf_post(sess, url_api, payload, _make_headers(api_key), is_cf=is_cf, verify=verify, timeout=8)
                 if r is not None and r.status_code == 200:
                     try:
                         data = r.json()
@@ -307,7 +313,11 @@ def _fetch_lbc(proxy_session=None, proxy_is_cf: bool = False, direct_session=Non
             time.sleep(1)
         time.sleep(1.5)
 
-    if api_total > 0:
+    # CF Turnstile bloque HTML depuis GitHub Actions — retour immédiat
+    print(f"[scraper] LBC : {api_total} annonces via API (HTML désactivé, CF 403).")
+    return all_listings
+
+    if api_total > 0:  # dead code — conservé pour référence
         return all_listings
 
     # ── Fallback HTML ─────────────────────────────────────────────────────────
