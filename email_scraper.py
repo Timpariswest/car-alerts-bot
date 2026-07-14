@@ -19,6 +19,7 @@ import imaplib
 import os
 import re
 import socket
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 # Timeout global pour toutes les connexions réseau (IMAP inclus)
@@ -102,16 +103,18 @@ def _fetch_gmail_htmls(username: str, password: str, sender_patterns: list[str],
         mail.login(username, password)
         mail.select("INBOX")
 
+        since = (datetime.utcnow() - timedelta(days=7)).strftime("%d-%b-%Y")
         for pattern in sender_patterns:
-            status, data = mail.search(None, f'(UNSEEN FROM "{pattern}")')
+            status, data = mail.search(None, f'(FROM "{pattern}" SINCE "{since}")')
             if status != "OK":
                 continue
             msg_ids = data[0].split()
             if not msg_ids:
+                print(f"  [email] 0 email de '{pattern}' (7 derniers jours) — configurer alerte sur le site ?")
                 continue
-            # Max 10 emails par pattern pour éviter de bloquer trop longtemps
-            msg_ids = msg_ids[-10:]
-            print(f"  [email] {len(msg_ids)} email(s) non lu(s) de '{pattern}'")
+            # Max 20 emails par pattern
+            msg_ids = msg_ids[-20:]
+            print(f"  [email] {len(msg_ids)} email(s) de '{pattern}' (7j)")
             for msg_id in msg_ids:
                 try:
                     status2, msg_data = mail.fetch(msg_id, "(RFC822)")
